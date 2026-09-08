@@ -1,0 +1,184 @@
+---
+title: "subgroup_analyses"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(jstable) # 亚组分析与交互作用
+library(survival) 
+library(dplyr) # mutate
+library(tidyr) # %>% 
+library(plyr) # revalue
+```
+
+
+#### **读取数据**
+
+- 所有数据
+
+```{r include=FALSE,collapse=TRUE}
+sub_data0 <- readRDS("./output_data/data_analyze_nonlinear.rds")
+```
+
+#### **数据准备**
+
+```{r include=FALSE,collapse=TRUE, eval=FALSE}
+inc_1 <- sub_data0[sub_data0$incidence == 1, ]
+
+median_age_inc <- median(inc_1$Age, na.rm = TRUE)
+average_age_inc <- mean(inc_1$Age, na.rm = TRUE)
+```
+
+
+```{r collapse=TRUE, eval=FALSE}
+# 年龄分组；性别分组；吸烟分组；饮酒分组；有无癌症家族史分组；
+
+sub_data <- sub_data0 %>%
+  mutate(Age_group = ifelse(Age < 55, "<55", ">=55")) %>%
+  mutate(Age_group = factor(Age_group, levels = c("<55", ">=55"))) %>% 
+  mutate(Sex = revalue(Sex, c("1" = "Female", "2" = "Male")),
+         Smoking = revalue(Smoking, c("0" = "No", "1" = "Yes")),
+         Drinking = revalue(Drinking, c("0" = "No", "1" = "Yes")),
+         History = revalue(History, c("0" = "No", "1" = "Yes")))
+```
+
+
+```{r collapse=TRUE}
+sub_data <- sub_data0 %>%
+  mutate(Age_group = case_when(
+    Age >= 35 & Age < 45 ~ "35-44",
+    Age >= 45 & Age < 55 ~ "45-54",
+    Age >= 55 & Age < 65 ~ "55-64",
+    Age >= 65 & Age <= 70 ~ "65-70"
+  )) %>%
+  mutate(Age_group = factor(Age_group, levels = c("35-44", "45-54", "55-64", "65-70"))) %>%
+  mutate(Sex = revalue(Sex, c("1" = "Female", "2" = "Male")),
+         Smoking = revalue(Smoking, c("0" = "No", "1" = "Yes")),
+         Drinking = revalue(Drinking, c("0" = "No", "1" = "Yes")),
+         History = revalue(History, c("0" = "No", "1" = "Yes")))
+```
+
+
+#### 定义变量
+
+```{r collapse=TRUE}
+# 纳入分析变量名
+variable.names <- c("PGI", "PGII", "PGR", "G17", "HP")
+
+# 纳入分析的亚组
+subgroup.names <- c("Age_group", "Sex", "Smoking", "Drinking", "History")
+```
+
+
+#### **亚组分析-==总发癌==**
+
+#### for循环函数
+
+```{r collapse=TRUE}
+for (x in variable.names) {
+  # 构建生存分析公式
+  formula <- as.formula(paste0("Surv(time, incidence) ~ ", x))
+
+  # 亚组分析
+  sub_res <- TableSubgroupMultiCox(formula = formula,
+                                   var_subgroups = subgroup.names,
+                                   data = sub_data)
+  
+  # 创建新的P值列，并将原始P值复制到新列
+  sub_res <- sub_res %>%
+    mutate(p.convert.value = `P value`)
+
+  # 将p.convert.value中小于0.001的替换为0.001
+  sub_res$p.convert.value[sub_res$p.convert.value < 0.001] <- 0.001
+  
+  # 使用p.adjust进行FDR校正
+  sub_res <- sub_res %>%
+    mutate(fdr.p.value = p.adjust(sub_res$`p.convert.value`, method = "fdr")) %>%
+    mutate(fdr.p.value = round(fdr.p.value, 3))  # 保留三位小数
+
+  # 输出结果
+  print(sub_res)
+
+  # 保存结果到 CSV 文件
+  output_file <- paste0("./output_table/3. subgroup/incidence/", x, "_sub_incidence1.csv")
+  write.csv(sub_res, file = output_file, na = "")
+}
+```
+
+
+
+#### **亚组分析-==总死亡==**
+
+#### for循环函数
+
+```{r collapse=TRUE}
+for (x in variable.names) {
+  # 构建生存分析公式
+  formula <- as.formula(paste0("Surv(time, death) ~ ", x))
+
+  # 亚组分析
+  sub_res <- TableSubgroupMultiCox(formula = formula,
+                                   var_subgroups = subgroup.names,
+                                   data = sub_data)
+  
+  # 创建新的P值列，并将原始P值复制到新列
+  sub_res <- sub_res %>%
+    mutate(p.convert.value = `P value`)
+
+  # 将p.convert.value中小于0.001的替换为0.001
+  sub_res$p.convert.value[sub_res$p.convert.value < 0.001] <- 0.001
+  
+  # 使用p.adjust进行FDR校正
+  sub_res <- sub_res %>%
+    mutate(fdr.p.value = p.adjust(sub_res$`p.convert.value`, method = "fdr")) %>%
+    mutate(fdr.p.value = round(fdr.p.value, 3))  # 保留三位小数
+
+  # 输出结果
+  print(sub_res)
+
+  # 保存结果到 CSV 文件
+  output_file <- paste0("./output_table/3. subgroup/death/", x, "_sub_death1.csv")
+  write.csv(sub_res, file = output_file, na = "")
+}
+```
+
+
+#### **亚组分析-==癌症死亡==**
+
+#### for循环函数
+
+```{r collapse=TRUE}
+for (x in variable.names) {
+  # 构建生存分析公式
+  formula <- as.formula(paste0("Surv(time, Cancer) ~ ", x))
+
+  # 亚组分析
+  sub_res <- TableSubgroupMultiCox(formula = formula,
+                                   var_subgroups = subgroup.names,
+                                   data = sub_data)
+  
+  # 创建新的P值列，并将原始P值复制到新列
+  sub_res <- sub_res %>%
+    mutate(p.convert.value = `P value`)
+
+  # 将p.convert.value中小于0.001的替换为0.001
+  sub_res$p.convert.value[sub_res$p.convert.value < 0.001] <- 0.001
+  
+  # 使用p.adjust进行FDR校正
+  sub_res <- sub_res %>%
+    mutate(fdr.p.value = p.adjust(sub_res$`p.convert.value`, method = "fdr")) %>%
+    mutate(fdr.p.value = round(fdr.p.value, 3))  # 保留三位小数
+
+  # 输出结果
+  print(sub_res)
+
+  # 保存结果到 CSV 文件
+  output_file <- paste0("./output_table/3. subgroup/Cancer/", x, "_sub_Cancer1.csv")
+  write.csv(sub_res, file = output_file, na = "")
+}
+```

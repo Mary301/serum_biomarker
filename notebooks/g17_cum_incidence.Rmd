@@ -1,0 +1,113 @@
+---
+title: "g17_cum_incidence"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+# library(plyr)
+library(dplyr)
+library(tidyr)
+# library(glmnet) # Lasso回归
+# library(dplyr)
+# library(tidymodels)
+# library(themis)
+
+library(ggplot2)
+library(survminer)
+
+library(survival)
+```
+
+
+
+#### 读取数据
+
+```{r include=FALSE}
+all_data <- readRDS("./output_data/g17/data_analyze_g17_score.rds")
+
+# write.csv(all_data, file = "./output_data/km_17points_all_data.csv", row.names = FALSE)
+
+km_data <- all_data
+```
+
+
+#### **1.2 三分类 ==三分位数为中风险==**
+
+```{r collapse=TRUE}
+fit <- survfit(Surv(time, incidence) ~ score_3, km_data)
+fit
+
+# 定义要提取的时间点
+times <- c(3, 5, 10, 15)
+
+# 使用 summary 函数提取特定时间点的生存概率
+summary_fit <- summary(fit, times = times)
+cumulative_incidence <- 1 - summary_fit$surv
+
+# 创建累积发病率数据框
+incidence_df <- data.frame(
+  time = summary_fit$time,
+  strata = summary_fit$strata,
+  cumulative_incidence = cumulative_incidence
+)
+
+# 转换成宽表格
+incidence_df <- incidence_df %>%
+  # mutate(cumulative_incidence = percent(cumulative_incidence, accuracy = 0.0001)) %>%
+  pivot_wider(names_from = strata, values_from = cumulative_incidence)
+
+incidence_df
+```
+
+
+
+#### 时间点对应的status
+
+```{r collapse=TRUE}
+# 定义要提取的时间点
+count_status <- function(data, time) {
+  filtered_data <- data %>%
+    filter(time <= time)
+
+  status_counts <- filtered_data %>%
+    group_by(score_3) %>%
+    summarize(
+      status_0 = sum(incidence == 0),
+      status_1 = sum(incidence == 1),
+      total = n()
+    )
+
+  status_counts$time <- time
+  return(status_counts)
+}
+
+result_list <- lapply(times, function(t) count_status(all_data, t))
+status_df <- bind_rows(result_list)
+status_df
+
+# 将status_df转换为宽表格
+status_df_wide <- status_df %>%
+  pivot_wider(names_from = score_3, 
+              values_from = c(status_0, status_1, total),
+              names_sep = "_")
+
+status_df_wide
+```
+
+
+#### 合并数据
+
+```{r collapse=TRUE}
+final_df <- merge(incidence_df, status_df_wide, by.x = "time", by.y = "time", all = TRUE)
+
+# 打印最终结果
+print(final_df)
+
+# 保存数据
+write.csv(final_df, file = "./output_table/6. g17/model/all_cum_incidence.csv", row.names = FALSE)
+```

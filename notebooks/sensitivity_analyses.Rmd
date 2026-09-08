@@ -1,0 +1,636 @@
+---
+title: "sensitivity_analyses"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(MASS) # 逐步回归
+
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(glmnet) # Lasso回归
+library(dplyr)
+
+library(survival)
+
+library(broom)
+```
+
+
+#### **读取数据**
+
+- 所有数据
+
+```{r include=FALSE}
+data <- readRDS("./output_data/data_analyze_ca.rds")
+
+data1 <- data %>%
+  mutate(PGI=log10(PGI),
+         PGII=log10(PGII),
+         PGR=log10(PGR),
+         G17=log10(G17))
+
+data_1yrs <- data1[!(data1$time < 1),] # 去除随访1年内发病/死亡样本
+
+data_2yrs <- data1[!(data1$time < 2),] # 去除随访2年内发病/死亡样本
+```
+
+
+### **敏感性分析 ==去除随访1年内发病/死亡样本==**
+
+#### **相关性分析**
+
+#### **单因素Cox分析-==总人群==**
+
+- 定义变量 & 结局
+
+```{r collapse=TRUE}
+# 纳入分析变量名
+variable.names <- c("PGI", "PGII", "PGR", "G17", "HP")
+
+# 纳入分析结局名==除"Breast", "Corpus", "Cervix", "Ovary", "Prostate"==外
+outcome.names <- c("incidence", "death",
+                   "Head_neck", "Oesophageal", "Stomach", "Colorectal", 
+                   "Liver", "Gallbladder", "Pancreas", "Lung", 
+                   "Kidney", "Bladder", "CNS", "Thyroid", 
+                   "Cancer", "Cardiovascular", "Respiratory", 
+                   "Digestive", "Diabetes", "Other_mortality")
+```
+
+- 创建函数
+
+```{r collapse=TRUE}
+adj_uni_cox <- function(variable, outcome, data){
+  # 构建公式
+  formula <- as.formula(paste0(paste0("Surv(time,", outcome, "==1) ~ ", variable),
+                               "+Age + Sex + Smoking + Drinking + History"))
+  
+  # 拟合Cox模型
+  cox1 <- coxph(formula, data = data)
+  cox2 <- summary(cox1)
+  
+  # 提取所有系数和置信区间
+  results <- data.frame(
+    'Outcome' = outcome,  # 添加结局列
+    'Characteristics' = rownames(cox2$coefficients),
+    'HR' = round(cox2$conf.int[, 1], 2),
+    CI_lower = round(cox2$conf.int[, 3], 2),
+    CI_upper = round(cox2$conf.int[, 4], 2),
+    'P value' = round(cox2$coefficients[, 5], 3)
+  ) %>%
+    mutate('95%CI' = paste(CI_lower, CI_upper, sep = "-")) %>%
+    dplyr::select(-CI_lower, -CI_upper) # 去除 CI_lower 和 CI_upper 列
+
+
+  # 过滤出 variable 变量相关的行 (包含 variable 本身和它的交互项)
+  results <- results %>% filter(grepl(paste0("^", variable, ".*"), Characteristics))
+
+  return(results)
+}
+
+# 创建一个空列表，用于存储所有结果
+all_results <- list()
+```
+
+- 使用嵌套循环遍历所有变量和结局
+
+```{r collapse=TRUE}
+# 循环遍历所有结局
+for (outcome in outcome.names) {
+  # 创建一个空列表，用于存储当前结局的所有变量的结果
+  outcome_results <- list()
+  
+  # 循环遍历所有变量
+  for (variable in variable.names) {
+    # 创建数据子集，避免修改原始数据
+    data_subset <- data_1yrs
+    
+    # 检查 outcome 列是否存在 NA 值
+    if (any(is.na(data_subset[[outcome]]))) {
+      # 移除 outcome 列中包含 NA 值的行
+      data_subset <- data_subset[!is.na(data_subset[[outcome]]), ]
+    }
+    
+    # 拟合Cox模型并存储结果
+    result <- adj_uni_cox(variable, outcome, data_subset)
+    outcome_results[[length(outcome_results) + 1]] <- result
+  }
+  
+  # 将当前结局的所有变量的结果合并为一个数据框
+  outcome_result <- ldply(outcome_results, data.frame)
+  
+  # 将当前结局的结果添加到总结果列表中
+  all_results[[length(all_results) + 1]] <- outcome_result
+}
+
+# 将所有结局的结果合并为一个数据框
+final_result <- ldply(all_results, data.frame)
+
+# 打印最终结果
+print(final_result)
+
+
+# 统一 Benjamini-Hochberg 校正
+final_result_adj <- final_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+final_result_adj_outcome <- final_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(final_result, file = "./output_table/4. sensitivity/adj5_uni_cox_all_sex_1yrs.csv")
+# write.csv(final_result_adj, file = "./output_table/4. sensitivity/adj5_uni_cox_all_sex_adj135_1yrs.csv")
+write.csv(final_result_adj_outcome, file = "./output_table/4. sensitivity/adj5_uni_cox_all_sex_adj10_1yrs.csv")
+```
+
+
+#### **单因素Cox分析-==男/女==**
+
+- 创建男性和女性的数据子集
+
+```{r collapse=TRUE}
+data_1yrs_male <- data_1yrs[data_1yrs$Sex == "2", ]  # 男性
+data_1yrs_female <- data_1yrs[data_1yrs$Sex == "1", ]  # 女性
+```
+
+- 定义变量 & 结局
+
+```{r collapse=TRUE}
+# 纳入分析变量名
+variable.names_sex <- c("PGI", "PGII", "PGR", "G17", "HP")
+
+# 纳入分析结局名
+outcome.names_male <- c("incidence", "death",
+                        "Head_neck", "Oesophageal", "Stomach", "Colorectal", 
+                        "Liver", "Gallbladder", "Pancreas", "Lung", 
+                        "Kidney", "Bladder", "CNS", "Thyroid", "Prostate", # 前列腺癌
+                        "Cancer", "Cardiovascular", "Respiratory", 
+                        "Digestive", "Diabetes", "Other_mortality")
+
+outcome.names_female <- c("incidence", "death",
+                          "Head_neck", "Oesophageal", "Stomach", "Colorectal", 
+                          "Liver", "Gallbladder", "Pancreas", "Lung", 
+                          "Kidney", "Bladder", "CNS", "Thyroid", 
+                          "Breast", "Corpus", "Cervix", "Ovary", # 乳腺癌、子宫体癌、宫颈癌、卵巢癌
+                          "Cancer", "Cardiovascular", "Respiratory", 
+                          "Digestive", "Diabetes", "Other_mortality")
+```
+
+- 创建函数
+
+```{r collapse=TRUE}
+adj_uni_cox_sex <- function(variable, outcome, data){
+  # 构建公式
+  formula <- as.formula(paste0(paste0("Surv(time,", outcome, "==1) ~ ", variable),
+                               "+Age + Smoking + Drinking + History"))
+  
+  # 拟合Cox模型
+  cox1 <- coxph(formula, data = data)
+  cox2 <- summary(cox1)
+  
+  # 提取所有系数和置信区间
+  results <- data.frame(
+    'Outcome' = outcome,  # 添加结局列
+    'Characteristics' = rownames(cox2$coefficients),
+    'HR' = round(cox2$conf.int[, 1], 2),
+    CI_lower = round(cox2$conf.int[, 3], 2),
+    CI_upper = round(cox2$conf.int[, 4], 2),
+    'P value' = round(cox2$coefficients[, 5], 3)
+  ) %>%
+    mutate('95%CI' = paste(CI_lower, CI_upper, sep = "-")) %>%
+    dplyr::select(-CI_lower, -CI_upper) # 去除 CI_lower 和 CI_upper 列
+
+
+  # 过滤出 variable 变量相关的行 (包含 variable 本身和它的交互项)
+  results <- results %>% filter(grepl(paste0("^", variable, ".*"), Characteristics))
+
+  return(results)
+}
+
+# 创建一个空列表，用于存储所有结果
+all_results <- list()
+```
+
+
+- 使用嵌套循环遍历所有变量和结局
+
+```{r collapse=TRUE}
+# 创建函数：进行单因素Cox分析
+perform_uni_cox_sex <- function(data, outcome.names, variable.names, sex_label) {
+  # 创建一个空列表，用于存储所有结果
+  all_results <- list()
+  
+  # 创建一个空向量，用于存储所有P值
+  all_p_values <- numeric()
+  
+  # 循环遍历所有结局
+  for (outcome in outcome.names) {
+    # 创建一个空列表，用于存储当前结局的所有变量的结果
+    outcome_results <- list()
+    
+    # 循环遍历所有变量
+    for (variable in variable.names) {
+      # 创建数据子集，避免修改原始数据
+      data_subset <- data
+    
+    # 检查 outcome 列是否存在 NA 值
+    if (any(is.na(data_subset[[outcome]]))) {
+      # 移除 outcome 列中包含 NA 值的行
+      data_subset <- data_subset[!is.na(data_subset[[outcome]]), ]
+    }
+      
+      # 拟合Cox模型并存储结果
+      result <- adj_uni_cox_sex(variable, outcome, data_subset)
+      outcome_results[[length(outcome_results) + 1]] <- result
+      
+      # 将当前P值添加到总P值向量中
+      all_p_values <- c(all_p_values, result$`P value`)
+    }
+    
+    # 将当前结局的所有变量的结果合并为一个数据框
+    outcome_result <- ldply(outcome_results, data.frame)
+    
+    # 将当前结局的结果添加到总结果列表中
+    all_results[[length(all_results) + 1]] <- outcome_result
+  }
+  
+  # 将所有结局的结果合并为一个数据框
+  final_result <- ldply(all_results, data.frame)
+  
+  # 添加性别标签
+  final_result$Sex <- sex_label
+  
+  return(final_result)
+}
+```
+
+- ==男性==
+
+```{r collapse=TRUE}
+# 对*男性*进行单因素Cox分析
+male_result <- perform_uni_cox_sex(data_1yrs_male, outcome.names_male, variable.names_sex, "Male")
+
+# 统一 Benjamini-Hochberg 校正
+male_result_adj <- male_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+male_result_adj_outcome <- male_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(male_result, file = "./output_table/4. sensitivity/adj5_uni_cox_all_male_1yrs.csv")
+# write.csv(male_result_adj, file = "./output_table/4. sensitivity/adj5_uni_cox_all_male105_1yrs.csv")
+write.csv(male_result_adj_outcome, file = "./output_table/4. sensitivity/adj5_uni_cox_all_male_adj10_1yrs.csv")
+```
+
+
+- ==女性==
+
+```{r collapse=TRUE}
+# 对*女性*进行单因素Cox分析
+female_result <- perform_uni_cox_sex(data_1yrs_female, outcome.names_female, variable.names_sex, "female")
+
+# 统一 Benjamini-Hochberg 校正
+female_result_adj <- female_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+female_result_adj_outcome <- female_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(female_result, file = "./output_table/4. sensitivity/adj5_uni_cox_all_female_1yrs.csv")
+# write.csv(female_result_adj, file = "./output_table/4. sensitivity/adj5_uni_cox_all_female120_1yrs.csv")
+write.csv(female_result_adj_outcome, file = "./output_table/4. sensitivity/adj5_uni_cox_all_female_adj10_1yrs.csv")
+```
+
+
+
+### **敏感性分析 ==去除随访2年内发病/死亡样本==**
+
+#### **相关性分析**
+
+#### **单因素Cox分析-==总人群==**
+
+- 使用嵌套循环遍历所有变量和结局
+
+```{r collapse=TRUE}
+# 循环遍历所有结局
+for (outcome in outcome.names) {
+  # 创建一个空列表，用于存储当前结局的所有变量的结果
+  outcome_results <- list()
+  
+  # 循环遍历所有变量
+  for (variable in variable.names) {
+    # 创建数据子集，避免修改原始数据
+    data_subset <- data_2yrs
+    
+    # 检查 outcome 列是否存在 NA 值
+    if (any(is.na(data_subset[[outcome]]))) {
+      # 移除 outcome 列中包含 NA 值的行
+      data_subset <- data_subset[!is.na(data_subset[[outcome]]), ]
+    }
+    
+    # 拟合Cox模型并存储结果
+    result <- adj_uni_cox(variable, outcome, data_subset)
+    outcome_results[[length(outcome_results) + 1]] <- result
+  }
+  
+  # 将当前结局的所有变量的结果合并为一个数据框
+  outcome_result <- ldply(outcome_results, data.frame)
+  
+  # 将当前结局的结果添加到总结果列表中
+  all_results[[length(all_results) + 1]] <- outcome_result
+}
+
+# 将所有结局的结果合并为一个数据框
+final_result <- ldply(all_results, data.frame)
+
+# 打印最终结果
+print(final_result)
+
+
+# 统一 Benjamini-Hochberg 校正
+final_result_adj <- final_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+final_result_adj_outcome <- final_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(final_result, file = "./output_table/4. sensitivity/adj5_uni_cox_all_sex_2yrs.csv")
+# write.csv(final_result_adj, file = "./output_table/4. sensitivity/adj5_uni_cox_all_sex_adj135_2yrs.csv")
+write.csv(final_result_adj_outcome, file = "./output_table/4. sensitivity/adj5_uni_cox_all_sex_adj10_2yrs.csv")
+```
+
+
+#### **单因素Cox分析-==男/女==**
+
+- 创建男性和女性的数据子集
+
+```{r collapse=TRUE}
+data_2yrs_male <- data_2yrs[data_2yrs$Sex == "2", ]  # 男性
+data_2yrs_female <- data_2yrs[data_2yrs$Sex == "1", ]  # 女性
+```
+
+
+- ==男性==
+
+```{r collapse=TRUE}
+# 对*男性*进行单因素Cox分析
+male_result <- perform_uni_cox_sex(data_2yrs_male, outcome.names_male, variable.names_sex, "Male")
+
+# 统一 Benjamini-Hochberg 校正
+male_result_adj <- male_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+male_result_adj_outcome <- male_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(male_result, file = "./output_table/4. sensitivity/adj5_uni_cox_all_male_2yrs.csv")
+# write.csv(male_result_adj, file = "./output_table/4. sensitivity/adj5_uni_cox_all_male105_2yrs.csv")
+write.csv(male_result_adj_outcome, file = "./output_table/4. sensitivity/adj5_uni_cox_all_male_adj10_2yrs.csv")
+```
+
+
+- ==女性==
+
+```{r collapse=TRUE}
+# 对*女性*进行单因素Cox分析
+female_result <- perform_uni_cox_sex(data_2yrs_female, outcome.names_female, variable.names_sex, "female")
+
+# 统一 Benjamini-Hochberg 校正
+female_result_adj <- female_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+female_result_adj_outcome <- female_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(female_result, file = "./output_table/4. sensitivity/adj5_uni_cox_all_female_2yrs.csv")
+# write.csv(female_result_adj, file = "./output_table/4. sensitivity/adj5_uni_cox_all_female120_2yrs.csv")
+write.csv(female_result_adj_outcome, file = "./output_table/4. sensitivity/adj5_uni_cox_all_female_adj10_2yrs.csv")
+```
+
+
+
+### **敏感性分析 ==去除随访中发生胃癌样本==**
+
+
+```{r collapse=TRUE}
+data_ex_gc <- data1[!(data1$Stomach == 1 & !is.na(data1$Stomach)), ] # 去除随访中发生胃癌样本
+```
+
+
+- 定义变量 & 结局
+
+```{r collapse=TRUE}
+# 纳入分析变量名
+variable.names <- c("PGI", "PGII", "PGR", "G17", "HP")
+
+# 纳入分析结局名==除"Breast", "Corpus", "Cervix", "Ovary", "Prostate"==外
+outcome.names <- c("incidence", "death",
+                   "Cancer", "Cardiovascular", "Respiratory", 
+                   "Digestive", "Diabetes", "Other_mortality")
+```
+
+
+- 创建函数
+
+```{r collapse=TRUE}
+adj_uni_cox <- function(variable, outcome, data){
+  # 构建公式
+  formula <- as.formula(paste0(paste0("Surv(time,", outcome, "==1) ~ ", variable),
+                               "+Age + Sex + Smoking + Drinking + History"))
+  
+  # 拟合Cox模型
+  cox1 <- coxph(formula, data = data)
+  cox2 <- summary(cox1)
+  
+  # 提取所有系数和置信区间
+  results <- data.frame(
+    'Outcome' = outcome,  # 添加结局列
+    'Characteristics' = rownames(cox2$coefficients),
+    'HR' = round(cox2$conf.int[, 1], 2),
+    CI_lower = round(cox2$conf.int[, 3], 2),
+    CI_upper = round(cox2$conf.int[, 4], 2),
+    'P value' = round(cox2$coefficients[, 5], 3)
+  ) %>%
+    mutate('95%CI' = paste(CI_lower, CI_upper, sep = "-")) %>%
+    dplyr::select(-CI_lower, -CI_upper) # 去除 CI_lower 和 CI_upper 列
+
+
+  # 过滤出 variable 变量相关的行 (包含 variable 本身和它的交互项)
+  results <- results %>% filter(grepl(paste0("^", variable, ".*"), Characteristics))
+
+  return(results)
+}
+
+# 创建一个空列表，用于存储所有结果
+all_results <- list()
+```
+
+
+- 使用嵌套循环遍历所有变量和结局
+
+```{r collapse=TRUE}
+# 循环遍历所有结局
+for (outcome in outcome.names) {
+  # 创建一个空列表，用于存储当前结局的所有变量的结果
+  outcome_results <- list()
+  
+  # 循环遍历所有变量
+  for (variable in variable.names) {
+    # 创建数据子集，避免修改原始数据
+    data_subset <- data_ex_gc
+    
+    # 检查 outcome 列是否存在 NA 值
+    if (any(is.na(data_subset[[outcome]]))) {
+      # 移除 outcome 列中包含 NA 值的行
+      data_subset <- data_subset[!is.na(data_subset[[outcome]]), ]
+    }
+    
+    # 拟合Cox模型并存储结果
+    result <- adj_uni_cox(variable, outcome, data_subset)
+    outcome_results[[length(outcome_results) + 1]] <- result
+  }
+  
+  # 将当前结局的所有变量的结果合并为一个数据框
+  outcome_result <- ldply(outcome_results, data.frame)
+  
+  # 将当前结局的结果添加到总结果列表中
+  all_results[[length(all_results) + 1]] <- outcome_result
+}
+
+# 将所有结局的结果合并为一个数据框
+final_result <- ldply(all_results, data.frame)
+
+# 打印最终结果
+print(final_result)
+
+
+# 统一 Benjamini-Hochberg 校正
+final_result_adj <- final_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+final_result_adj_outcome <- final_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(final_result, file = "./output_table/4. sensitivity/adj5_uni_cox_all_sex_ex_gc.csv")
+# write.csv(final_result_adj, file = "./output_table/4. sensitivity/adj5_uni_cox_all_sex_adj135_ex_gc.csv")
+write.csv(final_result_adj_outcome, file = "./output_table/4. sensitivity/adj5_uni_cox_all_sex_adj10_ex_gc.csv")
+```
+
+
+
+#### **单因素Cox分析-==男/女==**
+
+- 创建男性和女性的数据子集
+
+```{r collapse=TRUE}
+data_ex_gc_male <- data_ex_gc[data_ex_gc$Sex == "2", ]  # 男性
+data_ex_gc_female <- data_ex_gc[data_ex_gc$Sex == "1", ]  # 女性
+```
+
+
+- ==男性==
+
+```{r collapse=TRUE}
+# 对*男性*进行单因素Cox分析
+male_result <- perform_uni_cox_sex(data_ex_gc_male, outcome.names, variable.names, "Male")
+
+# 统一 Benjamini-Hochberg 校正
+male_result_adj <- male_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+male_result_adj_outcome <- male_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(male_result, file = "./output_table/4. sensitivity/adj5_uni_cox_all_male_ex_gc.csv")
+# write.csv(male_result_adj, file = "./output_table/4. sensitivity/adj5_uni_cox_all_male105_ex_gc.csv")
+write.csv(male_result_adj_outcome, file = "./output_table/4. sensitivity/adj5_uni_cox_all_male_adj10_ex_gc.csv")
+```
+
+
+- ==女性==
+
+```{r collapse=TRUE}
+# 对*女性*进行单因素Cox分析
+female_result <- perform_uni_cox_sex(data_ex_gc_female, outcome.names, variable.names, "female")
+
+# 统一 Benjamini-Hochberg 校正
+female_result_adj <- female_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+female_result_adj_outcome <- female_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(female_result, file = "./output_table/4. sensitivity/adj5_uni_cox_all_female_ex_gc.csv")
+# write.csv(female_result_adj, file = "./output_table/4. sensitivity/adj5_uni_cox_all_female120_ex_gc.csv")
+write.csv(female_result_adj_outcome, file = "./output_table/4. sensitivity/adj5_uni_cox_all_female_adj10_ex_gc.csv")
+```
+
+

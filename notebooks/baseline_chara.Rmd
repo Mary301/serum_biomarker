@@ -1,0 +1,147 @@
+---
+title: "baseline_chara"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(plyr)
+library(dplyr)
+library(tidyr)
+# library(glmnet) # Lasso回归
+library(dplyr)
+
+# library(survival)
+```
+
+
+#### **导入数据**
+
+```{r include=FALSE,collapse=TRUE}
+ca_data0 <- read.csv("./input/data.csv")
+```
+
+- 查看数据
+
+```{r collapse=TRUE}
+colnames(ca_data0)
+str(ca_data0)
+
+skimr::skim(ca_data0)
+```
+
+
+
+#### **1.1 数据预处理**
+
+- 分类处理
+
+```{r collapse=TRUE}
+data=ca_data0
+
+# 转换为因子型
+fvars <- c("incidence", "death", "Sex", "HP", "Smoking", "Drinking", "History",
+           "Head_neck", "Oesophageal", "Stomach", "Colorectal", "Liver", 
+           "Gallbladder", "Pancreas", "Lung", "Breast", "Corpus", 
+           "Cervix", "Ovary", "Prostate", "Kidney", "Bladder", 
+           "CNS", "Thyroid", "Cancer", "Cardiovascular", "Respiratory", 
+           "Digestive", "Diabetes", "Other_mortality")
+
+data[fvars] <- lapply(data[fvars], factor)
+
+
+# 调整参照水平
+# 问卷信息
+data$Sex <- relevel(data$Sex, ref = "1") # 女性作为参照
+data$Smoking <- relevel(data$Smoking, ref = "0") # 从不吸烟作为参照
+data$Drinking <- relevel(data$Drinking, ref = "0") # 从不饮酒作为参照
+data$History <- relevel(data$History, ref = "0") # 无癌家族史作为参照
+
+# HP感染
+data$HP <- relevel(data$HP, ref = "0") # 无HP感染作为参照
+
+# incidence
+table(data$incidence)
+
+# time
+data$time <- data$time/365.25
+
+saveRDS(data, file = "./output_data/data_analyze_ca.rds")
+```
+
+
+#### **1.2 描述性统计**
+
+```{r include=FALSE,collapse=TRUE}
+library(tableone)
+```
+
+- 总人群
+
+```{r collapse=TRUE}
+dput(names(data))
+
+covars <-c("time", "Age", "Sex", "Smoking", "Drinking", "History",
+           "PGI", "PGII", "PGR", "G17", "HP")
+
+fvars<-c( "Sex", "Smoking", "Drinking", "History","HP")
+
+
+# 所有
+chara1 <- CreateTableOne(vars = covars,
+                         data =data,
+                         factorVars = fvars)
+chara1
+
+chara1_table <- print(chara1,
+                      nonnormal = c("time", "Age", "PGI", "PGII", "PGR", "G17"),
+                      showAllLevels=TRUE,
+                      formatOptions = list(big.mark = ","))
+
+# 癌
+chara2 <- CreateTableOne(vars = covars,
+                         strata = "incidence",
+                         data =data,
+                         factorVars = fvars)
+chara2
+
+chara2_table <- print(chara2,
+                      nonnormal = c("time", "Age", "PGI", "PGII", "PGR", "G17"),
+                      showAllLevels=TRUE,
+                      formatOptions = list(big.mark = ",")) 
+
+chara_table <- cbind(chara1_table, chara2_table)
+chara_df <- as.data.frame(chara_table)
+
+write.csv(chara_df, file = "./output_table/1. baseline/baseline_chara_all.csv")
+```
+
+
+- 死亡
+
+```{r collapse=TRUE}
+dput(names(data))
+
+covars <-c("time", "Age", "Sex", "Smoking", "Drinking", "History",
+           "PGI", "PGII", "PGR", "G17", "HP")
+
+fvars<-c( "Sex", "Smoking", "Drinking", "History","HP")
+
+
+# 所有
+chara1 <- CreateTableOne(vars = covars,
+                         strata = "death",
+                         data =data,
+                         factorVars = fvars)
+chara1
+
+chara1_table <- print(chara1,
+                      nonnormal = c("time", "Age", "PGI", "PGII", "PGR", "G17"),
+                      showAllLevels=TRUE,
+                      formatOptions = list(big.mark = ","))
+```
+

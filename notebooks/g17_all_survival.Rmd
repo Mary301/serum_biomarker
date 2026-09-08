@@ -1,0 +1,224 @@
+---
+title: "g17_all_survival"
+author: "Study authors"
+date: "`r Sys.Date()`"S
+output: html_document
+---
+
+
+#### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(dplyr)
+library(tidyr)
+
+library(ggplot2)
+library(survminer)
+library(survival)
+```
+
+
+
+#### 读取数据
+#### 重新准备时间数据
+
+```{r include=FALSE, eval=FALSE}
+all_data <- readRDS("./output_data/g17/data_analyze_g17_score.rds")
+
+# write.csv(all_data, file = "./output_data/km_17points_all_data.csv", row.names = FALSE)
+
+pri_data <- all_data
+```
+
+
+```{r collapse=TRUE, eval=FALSE}
+# str(pri_data)
+
+pri_data <- pri_data %>%
+  mutate(
+    status = case_when(
+      death == 0                    ~ 0,
+      death == 1 & Cancer == 1      ~ 1,
+      death == 1 & is.na(Cancer)    ~ 2,
+      TRUE                          ~ NA_real_
+    )
+  )
+
+pri_data$status <- factor(pri_data$status,
+                          levels = c(0, 1, 2))
+str(pri_data)
+
+table(pri_data$status)
+
+surv_data <- pri_data[, c("recode", "status", "time", "score_3")]
+
+# write.csv(surv_data, file = "./output_data/g17/all_surv_data.csv", row.names = FALSE)
+```
+
+
+```{r collapse=TRUE}
+surv_data_time <- read.csv("./output_data/g17/all_surv_data_deathtime.csv")
+head(surv_data_time)
+```
+
+
+#### **总人群**
+
+```{r collapse=TRUE}
+analysis_data <- surv_data_time %>%
+  # 创建事件指示变量：任何原因死亡
+  mutate(
+    any_death_event = ifelse(status %in% c(1, 2), 1, 0),
+    # 确保风险组是因子变量
+    risk_group = factor(score_3, levels = c("Low", "Medium", "High")),
+    # 转换时间单位为年（如果BS2D是天）
+    time_years = BS2D / 365.25
+  )
+
+# 检查数据
+table(analysis_data$risk_group)
+table(analysis_data$any_death_event)
+
+# 2. 创建生存对象（所有组一起）
+surv_object <- Surv(
+  time = analysis_data$time_years,  # 使用年为单位
+  event = analysis_data$any_death_event
+)
+
+# 3. 拟合Kaplan-Meier模型（按风险组分层）
+surv_fit_all <- survfit(
+  # surv_object ~ analysis_data$risk_group,
+  Surv(time_years, any_death_event) ~ risk_group,
+  data = analysis_data
+)
+
+# 查看结果摘要
+print(surv_fit_all)
+surv_fit_all$strata
+
+
+# 4. 提取特定时间点的生存率
+# 3年、5年、10年生存率
+summary_survival <- summary(
+  surv_fit_all, 
+  times = c(3, 5, 10, 15, 20, 25)  # 现在是年为单位
+)
+
+# 创建结果表格
+survival_table <- data.frame(
+  Group = summary_survival$strata,
+  Time = summary_survival$time,
+  N_risk = summary_survival$n.risk,
+  N_event = summary_survival$n.event,
+  Survival = round(summary_survival$surv, 4),
+  Lower_CI = round(summary_survival$lower, 4),
+  Upper_CI = round(summary_survival$upper, 4)
+)
+
+print(survival_table)
+
+write.csv(survival_table,
+          file = "./output_table/6. g17/model/survival/survival_table_by_risk_group.csv",
+          row.names = FALSE)
+```
+
+
+
+#### 5. Log-rank检验（比较三组）
+
+```{r collapse=TRUE}
+logrank_test <- survdiff(
+  # surv_object ~ analysis_data$risk_group,
+  Surv(time_years, any_death_event) ~ risk_group,
+  data = analysis_data
+)
+
+print(logrank_test)
+
+# 提取p值
+logrank_p <- 1 - pchisq(logrank_test$chisq, length(logrank_test$n) - 1)
+cat("\nLog-rank检验 P值:", round(logrank_p, 6), "\n")
+```
+
+
+#### **可视化**使用 ggsurvplot 绘制生存曲线
+
+```{r collapse=TRUE}
+pdf(file="./output_plot/model/g17_model/survival/survival_curve_by_risk_group.pdf",
+    width=6*1.25,
+    height=6)
+
+p <- ggsurvplot(
+  surv_fit_all,
+  data = analysis_data,
+  # 基本设置
+  xlab = "Time (years)", ylab = "Survival Probability", 
+  # 置信区间
+  conf.int = FALSE,
+  # conf.int.alpha = 0.2,
+  # conf.int.style = "ribbon",
+  # 坐标轴设置
+  xlim = c(0, 20),  
+  ylim = c(0.5, 1.0),  
+  break.time.by = 5, 
+  # p值和检验
+  pval = TRUE, 
+  pval.method = TRUE, 
+  pval.size=4.5,
+  pval.method.size=4.5,
+  pval.coord=c(3.5,0.7),
+  pval.method.coord=c(0.1,0.7),
+  # pval.coord = c(5, 0.05),  
+  # 颜色设置
+  palette = c("Low"="#2ca02c",
+              "Medium"="#ffa040",
+              "High"="#d62728"),
+  # 风险表
+  risk.table = TRUE,
+  # 图例
+  legend.title = " ",# 图例标题
+  legend.labs = c("Low", "Medium", "High"), # 图例标签
+  # legend = c(0.85, 0.85),  # 图例位置（右上）
+  # 字体大小
+  font.main = c(14, "bold"),
+  font.x = c(12, "plain"),
+  font.y = c(12, "plain"),
+  font.legend = c(11, "plain"),
+  font.risk.table = c(10, "plain"),
+  # 其他
+  ggtheme = theme_bw()
+)
+
+print(p)
+
+dev.off()
+
+# 保存图形
+# ggsave("./output_plot/model/gcrc_model/survival/survival_curve_by_risk_group.pdf",
+#        print(p),
+#        width = 6*1.25,
+#        height = 6)
+```
+
+
+
+#### 7. Cox回归分析（定量比较）
+
+```{r collapse=TRUE}
+cox_model <- coxph(
+  # surv_object ~ analysis_data$risk_group,
+  Surv(time_years, any_death_event) ~ risk_group,
+  data = analysis_data
+)
+
+summary(cox_model)
+
+# 提取风险比
+cox_results <- broom::tidy(cox_model, exponentiate = TRUE, conf.int = TRUE)
+print(cox_results)
+
+write.csv(cox_results,
+          file = "./output_table/6. g17/model/survival/survival_curve_by_risk_group.csv",
+          row.names = FALSE)
+```
+

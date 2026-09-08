@@ -1,0 +1,543 @@
+---
+title: "nonlinear_cor_adj"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(rms) # 非线性分析
+# library(ggrcs)
+library(skimr) # 数据摘要
+library(dplyr) # mutate
+library(tidyr) # %>% 
+library(survival) # coxph
+library(survminer)
+library(remotes)
+
+library(plyr) # ldply
+library(ggplot2)
+library(scales)
+```
+
+
+#### **读取数据**
+
+- 所有数据==胃癌==
+
+```{r include=FALSE, collapse=TRUE}
+linear_data <- readRDS("./output_data/data_analyze_nonlinear.rds")
+
+Stomach_data <- linear_data[!is.na(linear_data$Stomach), ]
+```
+
+
+#### 定义数据分布
+
+```{r include=FALSE, collapse=TRUE}
+dd <- datadist(Stomach_data)
+options(datadist = 'dd')
+```
+
+
+#### **线性/非线性分析PGI**
+
+#### **PGI分布**
+
+```{r collapse=TRUE}
+density <- density(Stomach_data$PGI)
+dmin <- as.numeric(min(density[["y"]]))
+dmin
+dmax <- as.numeric(max(density[["y"]]))
+dmax
+```
+
+
+#### **拟合Stomach**
+
+#### **拟合Stomach_PGI**
+
+```{r collapse=TRUE}
+knots3 <- cph(Surv(time, Stomach) ~ rcs(PGI, 3)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+knots4 <- cph(Surv(time, Stomach) ~ rcs(PGI, 4)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+knots5 <- cph(Surv(time, Stomach) ~ rcs(PGI, 5)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+
+# 判断模型AIC值
+AIC(knots3)
+AIC(knots4)
+AIC(knots5)
+
+# 选择最优模型（AIC值最小）
+PGI_fit <- update(knots3)
+# PGI_fit <- update(knots4)
+
+PGI_an <- anova(PGI_fit)
+PGI_an
+PGI_an_df <- as.data.frame(PGI_an)
+PGI_Stomach <- PGI_an_df %>%  
+  select(-"d.f.") %>%
+  mutate("variable" = rep("PGI", times = nrow(PGI_an_df))) # 结局
+
+
+PGI_OR <- Predict(PGI_fit, PGI, fun = exp, ref.zero = FALSE, conf.int = 0.95)
+
+# 打印HR值等于1对应的PGII值
+# print(PGI_OR[order(abs(PGI_OR$lower - 1))[1:10], ])
+summary(PGI_OR)
+
+# HR值等于1对应的PGI值：10^1.2641079 = 18.37
+# 上/下置信区间的HR等于1时对应的PGI值：10^1.5010469 = 31.70
+
+rcs_knots <- rcspline.eval(Stomach_data$PGI, nk = 3, knots.only = TRUE)
+# rcs_knots <- rcspline.eval(Stomach_data$PGI, nk = 4, knots.only = TRUE)
+print(rcs_knots)
+
+# 10^1.668386 # 约等于46.6
+# 10^1.935582 # 约等于86.2
+# 10^2.185093 # 约等于153.1
+
+PGI_knots_df <- data.frame(
+  rcs_knots = rcs_knots,
+  value = 10^rcs_knots
+)
+
+write.csv(PGI_knots_df, "./output_table/2. corr/nonlinear_adj/Stomach/PGI_knots_Stomach.csv")
+```
+
+- *Stomach_PGI可视化*
+
+```{r collapse=TRUE}
+PGI_plot <- ggplot(Stomach_data, aes(x = PGI)) +
+  # 添加直方图
+  geom_histogram(aes(x = PGI,
+                     y = rescale(..density.., c(dmin, dmax))),    # 与主Y轴一致
+                 alpha = 0.9,  # 透明度
+                 binwidth = 0.1,  # 直方图的箱宽
+                 fill = "#43cd82",  # 填充颜色
+                 colour = "grey60") +  # 边框颜色
+  # 添加预测值的线条
+  geom_line(data = PGI_OR, 
+            aes(PGI, yhat),  # x 轴为 PGI，y 轴为预测值
+            linetype = 'solid',  # 线条类型
+            size = 1,  # 线条宽度
+            alpha = 1,  # 透明度
+            colour = "#ff69b3") +  # 线条颜色
+  # 添加预测值的置信区间
+  geom_ribbon(data = PGI_OR,
+              aes(PGI,
+                  ymin = lower,  # 最低置信区间
+                  ymax = upper),  # 最高置信区间
+              linetype = 'dashed',  # 虚线
+              alpha = 0.2,  # 透明度
+              fill = "#ff69b3",  # 填充颜色
+              colour = "purple") +  # 边框颜色
+  # 添加水平线
+  geom_hline(yintercept = 1,  # 指定 y 轴截距为 1
+             linetype = "dashed",  # 设置线条类型为虚线
+             color = "darkgray") +  # 设置线条颜色为灰色
+  # 添加经典主题
+  theme_classic() + 
+  # 添加文本注释，显示 P 值
+  annotate("text",
+           x = 0.95,
+           y = 5.2,
+           label = paste0("P for overall < 0.001", "\nP for non-linear = 0.777"),  # 注释文本
+           hjust = 0.5,  # 水平对齐方式
+           size = 5,  # 字体大小
+           check_overlap = TRUE) +  # 避免重叠
+  # 设置坐标轴标签
+  labs(x = "log10(PGI)",
+       y = "HR(95%CI)") +
+  # 设置字体大小
+  theme(text = element_text(size = 12)) +
+  # 设置 x 轴刻度，范围从 2.5 到 6.5，刻度间隔为 2
+  scale_x_continuous(limits = c(0.2, 2.7),breaks = c(0.5,1,1.5,2,2.5))+
+  # 设置 y 轴刻度，范围从 0 到 11，刻度间隔为 1，同时设置右侧坐标轴
+  scale_y_continuous(limits = c(0, 6), breaks = c(0, 1, 2, 4, 6),
+                     sec.axis = sec_axis(~.,  # 使用恒等变换
+                     # sec.axis = sec_axis(~rescale(., c(dmin, dmax)),
+                                         name = "Probability density"))
+
+PGI_plot
+
+# 输出到本地
+ggsave("./output_plot/nonlinear_adj/Stomach/PGI_Stomach.pdf", width = 6*1.25, height = 6)
+```
+
+
+
+#### **PGII分布**
+
+```{r collapse=TRUE}
+density <- density(Stomach_data$PGII)
+dmin <- as.numeric(min(density[["y"]]))
+dmin
+dmax <- as.numeric(max(density[["y"]]))
+dmax
+```
+
+
+#### **拟合Stomach_PGII**
+
+```{r collapse=TRUE}
+knots3 <- cph(Surv(time, Stomach) ~ rcs(PGII, 3)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+knots4 <- cph(Surv(time, Stomach) ~ rcs(PGII, 4)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+knots5 <- cph(Surv(time, Stomach) ~ rcs(PGII, 5)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+
+# 判断模型AIC值
+AIC(knots3)
+AIC(knots4)
+AIC(knots5)
+
+# 选择最优模型（AIC值最小）
+PGII_fit <- update(knots3)
+# PGII_fit <- update(knots4)
+
+PGII_an <- anova(PGII_fit)
+PGII_an
+PGII_an_df <- as.data.frame(PGII_an)
+PGII_Stomach <- PGII_an_df %>%  
+  select(-"d.f.") %>%
+  mutate("variable" = rep("PGII", times = nrow(PGII_an_df))) # 结局
+
+
+PGII_OR <- Predict(PGII_fit, PGII, fun = exp, ref.zero = FALSE, conf.int = 0.95)
+
+# 打印HR值等于1对应的PGIII值
+# print(PGII_OR[order(abs(PGII_OR$lower - 1))[1:10], ])
+summary(PGII_OR)
+
+# HR值等于1对应的PGII值：10^1.67881139 = 47.73
+# 上/下置信区间的HR等于1时对应的PGII值：10^1.43132486 = 26.7
+
+rcs_knots <- rcspline.eval(Stomach_data$PGII, nk = 3, knots.only = TRUE)
+# rcs_knots <- rcspline.eval(Stomach_data$PGII, nk = 4, knots.only = TRUE)
+print(rcs_knots)
+
+# 10^1.668386 # 约等于46.6
+# 10^1.935582 # 约等于86.2
+# 10^2.185093 # 约等于153.1
+
+PGII_knots_df <- data.frame(
+  rcs_knots = rcs_knots,
+  value = 10^rcs_knots
+)
+
+write.csv(PGII_knots_df, "./output_table/2. corr/nonlinear_adj/Stomach/PGII_knots_Stomach.csv")
+```
+
+- *Stomach_PGII可视化*
+
+```{r collapse=TRUE}
+PGII_plot <- ggplot(Stomach_data, aes(x = PGII)) +
+  # 添加直方图
+  geom_histogram(aes(x = PGII,
+                     y = rescale(..density.., c(dmin, dmax))),  # 与主Y轴一致
+                 alpha = 0.9,  # 透明度
+                 binwidth = 0.1,  # 直方图的箱宽
+                 fill = "#43cd82",  # 填充颜色
+                 colour = "grey60") +  # 边框颜色
+  # 添加预测值的线条
+  geom_line(data = PGII_OR, 
+            aes(PGII, yhat),  # x 轴为 PGII，y 轴为预测值
+            linetype = 'solid',  # 线条类型
+            size = 1,  # 线条宽度
+            alpha = 1,  # 透明度
+            colour = "#ff69b3") +  # 线条颜色
+  # 添加预测值的置信区间
+  geom_ribbon(data = PGII_OR,
+              aes(PGII,
+                  ymin = lower,  # 最低置信区间
+                  ymax = upper),  # 最高置信区间
+              linetype = 'dashed',  # 虚线
+              alpha = 0.2,  # 透明度
+              fill = "#ff69b3",  # 填充颜色
+              colour = "purple") +  # 边框颜色
+  # 添加水平线
+  geom_hline(yintercept = 1,  # 指定 y 轴截距为 1
+             linetype = "dashed",  # 设置线条类型为虚线
+             color = "darkgray") +  # 设置线条颜色为灰色
+  # 添加经典主题
+  theme_classic() + 
+  # 添加文本注释，显示 P 值
+  annotate("text",
+           x = 0.15,
+           y = 3.2,
+           label = paste0("P for overall = 0.001", "\nP for non-linear = 0.584"),  # 注释文本
+           hjust = 0.5,  # 水平对齐方式
+           size = 5.2,  # 字体大小
+           check_overlap = TRUE) +  # 避免重叠
+  # 设置坐标轴标签
+  labs(x = "log10(PGII)",
+       y = "HR(95%CI)") +
+  # 设置字体大小
+  theme(text = element_text(size = 12)) +
+  # 设置 x 轴刻度，范围从 2.5 到 6.5，刻度间隔为 2
+  scale_x_continuous(limits = c(-0.3, 2.1),breaks = c(0,0.5,1,1.5,2))+
+  # 设置 y 轴刻度，范围从 0 到 11，刻度间隔为 1，同时设置右侧坐标轴
+  scale_y_continuous(limits = c(0, 4), breaks = c(0, 1, 2, 3, 4),
+                     sec.axis = sec_axis(~.,  # 使用恒等变换
+                     # sec.axis = sec_axis(~rescale(., c(dmin, dmax)),
+                                         name = "Probability density")
+                     )
+
+PGII_plot
+
+# 输出到本地
+ggsave("./output_plot/nonlinear_adj/Stomach/PGII_Stomach.pdf", width = 6*1.25, height = 6)
+```
+
+
+
+#### **PGR分布**
+
+```{r collapse=TRUE}
+density <- density(Stomach_data$PGR)
+dmin <- as.numeric(min(density[["y"]]))
+dmin
+dmax <- as.numeric(max(density[["y"]]))
+dmax
+```
+
+#### **拟合Stomach_PGR**
+
+```{r collapse=TRUE}
+knots3 <- cph(Surv(time, Stomach) ~ rcs(PGR, 3)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+knots4 <- cph(Surv(time, Stomach) ~ rcs(PGR, 4)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+knots5 <- cph(Surv(time, Stomach) ~ rcs(PGR, 5)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+
+# 判断模型AIC值
+AIC(knots3)
+AIC(knots4)
+AIC(knots5)
+
+# 选择最优模型（AIC值最小）
+PGR_fit <- update(knots3)
+# PGR_fit <- update(knots4)
+
+PGR_an <- anova(PGR_fit)
+PGR_an
+PGR_an_df <- as.data.frame(PGR_an)
+PGR_Stomach <- PGR_an_df %>%  
+  select(-"d.f.") %>%
+  mutate("variable" = rep("PGR", times = nrow(PGR_an_df))) # 结局
+
+
+PGR_OR <- Predict(PGR_fit, PGR, fun = exp, ref.zero = FALSE, conf.int = 0.95)
+
+# 打印HR值等于1对应的PGRI值
+# print(PGR_OR[order(abs(PGR_OR$lower - 1))[1:10], ])
+summary(PGR_OR)
+
+# HR值等于1对应的PGR值：10^0.635148823 = 4.32
+# 上/下置信区间的HR等于1时对应的PGR值：10^0.341074779 = 2.20
+# 上/下置信区间的HR等于1时对应的PGR值：10^0.775184082 = 6.00
+
+rcs_knots <- rcspline.eval(Stomach_data$PGR, nk = 3, knots.only = TRUE)
+# rcs_knots <- rcspline.eval(Stomach_data$PGR, nk = 4, knots.only = TRUE)
+print(rcs_knots)
+
+# 10^1.668386 # 约等于46.6
+# 10^1.935582 # 约等于86.2
+# 10^2.185093 # 约等于153.1
+
+PGR_knots_df <- data.frame(
+  rcs_knots = rcs_knots,
+  value = 10^rcs_knots
+)
+
+write.csv(PGR_knots_df, "./output_table/2. corr/nonlinear_adj/Stomach/PGR_knots_Stomach.csv")
+```
+
+- *Stomach_PGR可视化*
+
+```{r collapse=TRUE}
+PGR_plot <- ggplot(Stomach_data, aes(x = PGR)) +
+  # 添加直方图
+  geom_histogram(aes(x = PGR,
+                     y = rescale(..density.., c(dmin, dmax))),  # 与主Y轴一致
+                 alpha = 0.9,  # 透明度
+                 binwidth = 0.1,  # 直方图的箱宽
+                 fill = "#43cd82",  # 填充颜色
+                 colour = "grey60") +  # 边框颜色
+  # 添加预测值的线条
+  geom_line(data = PGR_OR, 
+            aes(PGR, yhat),  # x 轴为 PGR，y 轴为预测值
+            linetype = 'solid',  # 线条类型
+            size = 1,  # 线条宽度
+            alpha = 1,  # 透明度
+            colour = "#ff69b3") +  # 线条颜色
+  # 添加预测值的置信区间
+  geom_ribbon(data = PGR_OR,
+              aes(PGR,
+                  ymin = lower,  # 最低置信区间
+                  ymax = upper),  # 最高置信区间
+              linetype = 'dashed',  # 虚线
+              alpha = 0.2,  # 透明度
+              fill = "#ff69b3",  # 填充颜色
+              colour = "purple") +  # 边框颜色
+  # 添加水平线
+  geom_hline(yintercept = 1,  # 指定 y 轴截距为 1
+             linetype = "dashed",  # 设置线条类型为虚线
+             color = "darkgray") +  # 设置线条颜色为灰色
+  # 添加经典主题
+  theme_classic() + 
+  # 添加文本注释，显示 P 值
+  annotate("text",
+           x = 0.2,
+           y = 7,
+           label = paste0("P for overall < 0.001", "\nP for non-linear = 0.519"),  # 注释文本
+           hjust = 0.5,  # 水平对齐方式
+           size = 5,  # 字体大小
+           check_overlap = TRUE) +  # 避免重叠
+  # 设置坐标轴标签
+  labs(x = "log10(PGR)",
+       y = "HR(95%CI)") +
+  # 设置字体大小
+  theme(text = element_text(size = 12)) +
+  # 设置 x 轴刻度，范围从 2.5 到 6.5，刻度间隔为 2
+  scale_x_continuous(limits = c(-0.5, 2.2),breaks = c(-0.5,0,0.5,1,1.5,2))+
+  # 设置 y 轴刻度，范围从 0 到 11，刻度间隔为 1，同时设置右侧坐标轴
+  scale_y_continuous(limits = c(0, 8), breaks = c(0, 1, 2, 4, 6, 8),
+                     sec.axis = sec_axis(~.,  # 使用恒等变换
+                     # sec.axis = sec_axis(~rescale(., c(dmin, dmax)),
+                                         name = "Probability density")
+                     )
+
+PGR_plot
+
+# 输出到本地
+ggsave("./output_plot/nonlinear_adj/Stomach/PGR_Stomach.pdf", width = 6*1.25, height = 6)
+```
+
+
+
+#### **G17分布**
+
+```{r collapse=TRUE}
+density <- density(Stomach_data$G17)
+dmin <- as.numeric(min(density[["y"]]))
+dmin
+dmax <- as.numeric(max(density[["y"]]))
+dmax
+```
+
+
+#### **拟合Stomach_G17**
+
+```{r collapse=TRUE}
+knots3 <- cph(Surv(time, Stomach) ~ rcs(G17, 3)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+knots4 <- cph(Surv(time, Stomach) ~ rcs(G17, 4)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+knots5 <- cph(Surv(time, Stomach) ~ rcs(G17, 5)+Age + Sex + Smoking + Drinking + History, x=TRUE, y=TRUE, data = Stomach_data)
+
+# 判断模型AIC值
+AIC(knots3)
+AIC(knots4)
+AIC(knots5)
+
+# 选择最优模型（AIC值最小）
+G17_fit <- update(knots3)
+# G17_fit <- update(knots4)
+
+G17_an <- anova(G17_fit)
+G17_an
+G17_an_df <- as.data.frame(G17_an)
+G17_Stomach <- G17_an_df %>%  
+  select(-"d.f.") %>%
+  mutate("variable" = rep("G17", times = nrow(G17_an_df))) # 结局
+
+
+G17_OR <- Predict(G17_fit, G17, fun = exp, ref.zero = FALSE, conf.int = 0.95)
+
+# 打印HR值等于1对应的G17I值
+# print(G17_OR[order(abs(G17_OR$lower - 1))[1:10], ])
+summary(G17_OR)
+
+rcs_knots <- rcspline.eval(Stomach_data$G17, nk = 3, knots.only = TRUE)
+# rcs_knots <- rcspline.eval(Stomach_data$G17, nk = 4, knots.only = TRUE)
+print(rcs_knots)
+
+# 10^1.668386 # 约等于46.6
+# 10^1.935582 # 约等于86.2
+# 10^2.185093 # 约等于153.1
+
+G17_knots_df <- data.frame(
+  rcs_knots = rcs_knots,
+  value = 10^rcs_knots
+)
+
+write.csv(G17_knots_df, "./output_table/2. corr/nonlinear_adj/Stomach/G17_knots_Stomach.csv")
+```
+
+- *Stomach_G17可视化*
+
+```{r collapse=TRUE}
+G17_plot <- ggplot(Stomach_data, aes(x = G17)) +
+  # 添加直方图
+  geom_histogram(aes(x = G17,
+                     y = rescale(..density.., c(dmin, dmax))),  # 与主Y轴一致
+                 alpha = 0.9,  # 透明度
+                 binwidth = 0.1,  # 直方图的箱宽
+                 fill = "#43cd82",  # 填充颜色
+                 colour = "grey60") +  # 边框颜色
+  # 添加预测值的线条
+  geom_line(data = G17_OR, 
+            aes(G17, yhat),  # x 轴为 G17，y 轴为预测值
+            linetype = 'solid',  # 线条类型
+            size = 1,  # 线条宽度
+            alpha = 1,  # 透明度
+            colour = "#ff69b3") +  # 线条颜色
+  # 添加预测值的置信区间
+  geom_ribbon(data = G17_OR,
+              aes(G17,
+                  ymin = lower,  # 最低置信区间
+                  ymax = upper),  # 最高置信区间
+              linetype = 'dashed',  # 虚线
+              alpha = 0.2,  # 透明度
+              fill = "#ff69b3",  # 填充颜色
+              colour = "purple") +  # 边框颜色
+  # 添加水平线
+  geom_hline(yintercept = 1,  # 指定 y 轴截距为 1
+             linetype = "dashed",  # 设置线条类型为虚线
+             color = "darkgray") +  # 设置线条颜色为灰色
+  # 添加经典主题
+  theme_classic() + 
+  # 添加文本注释，显示 P 值
+  annotate("text",
+           x = -0.45,
+           y = 3.2,
+           label = paste0("P for overall = 0.099", "\nP for non-linear = 0.034"),  # 注释文本
+           hjust = 0.5,  # 水平对齐方式
+           size = 5,  # 字体大小
+           check_overlap = TRUE) +  # 避免重叠
+  # 设置坐标轴标签
+  labs(x = "log10(G17)",
+       y = "HR(95%CI)") +
+  # 设置字体大小
+  theme(text = element_text(size = 12)) +
+  # 设置 x 轴刻度，范围从 2.5 到 6.5，刻度间隔为 2
+  scale_x_continuous(limits = c(-1, 2.3),breaks = c(-1.0,-0.5,0,0.5,1,1.5,2,2.5))+
+  # 设置 y 轴刻度，范围从 0 到 11，刻度间隔为 1，同时设置右侧坐标轴
+  scale_y_continuous(limits = c(0, 4), breaks = c(0, 1, 2, 3, 4),
+                     sec.axis = sec_axis(~.,  # 使用恒等变换
+                     # sec.axis = sec_axis(~rescale(., c(dmin, dmax)),
+                                         name = "Probability density")
+                     )
+
+G17_plot
+
+# 输出到本地
+ggsave("./output_plot/nonlinear_adj/Stomach/G17_Stomach.pdf", width = 6*1.25, height = 6)
+```
+
+
+#### **汇总结果**
+
+```{r collapse=TRUE, echo=FALSE}
+nonlinear_Stomach <- rbind(PGI_Stomach, PGII_Stomach, PGR_Stomach, G17_Stomach)
+
+write.csv(nonlinear_Stomach, "./output_table/2. corr/nonlinear_adj/Stomach/nonlinear_Stomach.csv")
+```

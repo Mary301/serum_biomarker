@@ -1,0 +1,273 @@
+---
+title: "calibration"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### **效能评估**
+#### **calibration**
+
+### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(dplyr) # mutate
+library(pec)
+library(rms) # cph
+library(survival)
+library(survminer)
+
+library(pROC)
+library(caret)
+library(riskRegression)
+library(ggplot2)
+```
+
+
+
+### **读取数据**
+
+```{r include=FALSE}
+gcrc_data <- readRDS("./output_data/gcrc/data_analyze_gcrc.rds")
+
+data0 <- gcrc_data 
+```
+
+
+### **数据预处理**
+
+```{r collapse=TRUE}
+# 胃癌数据
+gc_data <- data0 %>%
+  mutate(PGI=log10(PGI),
+         PGII=log10(PGII),
+         PGR=log10(PGR),
+         G17=log10(G17)) %>% 
+  filter(!is.na(Stomach))
+
+gc_data$Stomach <- as.numeric(as.character(gc_data$Stomach))
+
+# 肠癌数据
+crc_data <- data0 %>%
+  mutate(PGI=log10(PGI),
+         PGII=log10(PGII),
+         PGR=log10(PGR),
+         G17=log10(G17)) %>% 
+  filter(!is.na(Colorectal))
+
+crc_data$Colorectal <- as.numeric(as.character(crc_data$Colorectal))
+
+# 胃肠癌数据
+gcrc_data <- data0 %>%
+  mutate(PGI=log10(PGI),
+         PGII=log10(PGII),
+         PGR=log10(PGR),
+         G17=log10(G17)) %>% 
+  filter(!is.na(gcrc))
+
+gcrc_data$gcrc <- as.numeric(as.character(gcrc_data$gcrc))
+```
+
+
+
+### *胃癌模型*
+
+```{r collapse=TRUE}
+gc_cox <- coxph(Surv(time, Stomach) ~ PGI + PGII +
+                  Age_clas + Sex + Smoking + Drinking + History,
+                data = gc_data, x = TRUE, y =TRUE)
+```
+
+
+```{r collapse=TRUE}
+gc_cox_score <- Score(list("Gastric cancer" = gc_cox),
+                         formula = Surv(time, Stomach) ~ 1,
+                         data = gc_data,
+                         plots = "cal"
+)
+```
+
+```{r collapse=TRUE}
+pdf(file="./output_plot/model/gc_model/combine_calib_gc.pdf",width=6*1.25,height=6)
+
+plotCalibration(gc_cox_score,
+                method="quantile",
+                q = 6,
+                cens.method="local",
+                xlim = c(0, 0.04), 
+                ylim = c(0, 0.04),
+                auc.in.legend=F,
+                brier.in.legend=F,
+                legend=T,
+                lty=1,
+                lwd=2,
+                type="l",
+                xlab = "Predicted Risk",
+                ylab = "Observerd Risk",
+                col=c("#0f99b2"),
+                xaxp = c(0, 0.04, 4),  # 将x轴分为4个间隔
+                yaxp = c(0, 0.04, 4))
+
+dev.off()
+```
+
+
+### *肠癌模型*
+
+```{r collapse=TRUE}
+crc_cox <- coxph(Surv(time, Colorectal) ~ PGI + PGII +
+                  Age_clas + Sex + Smoking + Drinking + History,
+                data = crc_data, x = TRUE, y =TRUE)
+```
+
+
+```{r collapse=TRUE}
+crc_cox_score <- Score(list("Colorectal cancer" = crc_cox),
+                         formula = Surv(time, Colorectal) ~ 1,
+                         data = crc_data,
+                         plots = "cal"
+)
+```
+
+```{r collapse=TRUE}
+pdf(file="./output_plot/model/crc_model/combine_calib_crc.pdf",width=6*1.25,height=6)
+
+plotCalibration(crc_cox_score,
+                method="quantile",
+                q = 6,
+                cens.method="local",
+                xlim = c(0, 0.04), 
+                ylim = c(0, 0.04),
+                auc.in.legend=F,
+                brier.in.legend=F,
+                legend=T,
+                lty=1,
+                lwd=2,
+                type="l",
+                xlab = "Predicted Risk",
+                ylab = "Observerd Risk",
+                col=c("#ffa040"),
+                xaxp = c(0, 0.04, 4),  # 将x轴分为4个间隔
+                yaxp = c(0, 0.04, 4))
+
+dev.off()
+```
+
+
+
+### *胃肠癌模型*
+
+```{r collapse=TRUE}
+gcrc_cox <- coxph(Surv(time, gcrc) ~ PGI + PGII +
+                  Age_clas + Sex + Smoking + Drinking + History,
+                data = gcrc_data, x = TRUE, y =TRUE)
+```
+
+
+```{r collapse=TRUE}
+gcrc_cox_score <- Score(list("Gastrointestinal cancer" = gcrc_cox),
+                         formula = Surv(time, gcrc) ~ 1,
+                         data = gcrc_data,
+                         plots = "cal"
+)
+```
+
+```{r collapse=TRUE}
+pdf(file="./output_plot/model/gcrc_model/combine_calib_gcrc.pdf",width=6*1.25,height=6)
+
+plotCalibration(gcrc_cox_score,
+                method="quantile",
+                q = 6,
+                cens.method="local",
+                xlim = c(0, 0.05), 
+                ylim = c(0, 0.05),
+                auc.in.legend=F,
+                brier.in.legend=F,
+                legend=T,
+                lty=1,
+                lwd=2,
+                type="l",
+                xlab = "Predicted Risk",
+                ylab = "Observerd Risk",
+                col=c("#ff0000"),
+                xaxp = c(0, 0.05, 5),  # 将x轴分为5个间隔
+                yaxp = c(0, 0.05, 5)
+                )
+
+dev.off()
+```
+
+
+
+### 放一张图
+
+```{r collapse=TRUE}
+pdf(file="./output_plot/model/gcrc_model/all_calib.pdf",width=6*1.25,height=6)
+
+plotCalibration(gc_cox_score,
+                method="quantile",
+                q = 6,
+                cens.method="local",
+                xlim = c(0, 0.05), 
+                ylim = c(0, 0.05),
+                auc.in.legend=F,
+                brier.in.legend=F,
+                legend=T,
+                lty=1,
+                lwd=2,
+                type="l",
+                xlab = "Predicted Risk",
+                ylab = "Observerd Risk",
+                col=c("#0f99b2"),
+                xaxp = c(0, 0.05, 5),  # 将x轴分为4个间隔
+                yaxp = c(0, 0.05, 5))
+
+plotCalibration(crc_cox_score,
+                method="quantile",
+                q = 6,
+                cens.method="local",
+                # xlim = c(0, 0.04), 
+                # ylim = c(0, 0.04),
+                auc.in.legend=F,
+                brier.in.legend=F,
+                legend=T,
+                lty=2,
+                lwd=2,
+                type="l",
+                xlab = "Predicted Risk",
+                ylab = "Observerd Risk",
+                col=c("#ffa040"),
+                # xaxp = c(0, 0.04, 4),  # 将x轴分为4个间隔
+                # yaxp = c(0, 0.04, 4),
+                add=T)
+
+plotCalibration(gcrc_cox_score,
+                method="quantile",
+                q = 6,
+                cens.method="local",
+                # xlim = c(0, 0.05), 
+                # ylim = c(0, 0.05),
+                auc.in.legend=F,
+                brier.in.legend=F,
+                legend=T,
+                lty=1,
+                lwd=2,
+                type="l",
+                xlab = "Predicted Risk",
+                ylab = "Observerd Risk",
+                col=c("#ff0000"),
+                # xaxp = c(0, 0.05, 5),  # 将x轴分为5个间隔
+                # yaxp = c(0, 0.05, 5),
+                add=T)
+
+
+legend("topleft",  # 调整图例位置
+       legend = c("GC", "CRC", "GIC"),
+       col = c("#0f99b2", "#ffa040", "#ff0000"),
+       lty = c(1, 2),
+       lwd = 2,
+       bty = "n")
+
+dev.off()
+```

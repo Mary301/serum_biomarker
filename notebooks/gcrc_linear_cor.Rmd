@@ -1,0 +1,145 @@
+---
+title: "gcrc_linear_cor"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(skimr) # 数据摘要
+library(dplyr) # mutate
+library(tidyr) # %>% 
+library(survival)
+library(plyr)
+```
+
+
+#### **读取数据**
+
+```{r include=FALSE}
+gcrc_data <- readRDS("./output_data/gcrc/data_analyze_gcrc.rds")
+
+data1 <- gcrc_data # 分析数据data1
+```
+
+- 查看数据
+
+```{r collapse=TRUE}
+dput(names(data1))
+str(data1)
+
+skimr::skim(data1)
+```
+
+### **单因素Cox分析-==调整协变量==**
+
+#### 定义变量 & 结局
+
+```{r collapse=TRUE}
+# 纳入分析变量名
+variable.names <- c("PGI_gc", "PGI_crc", "PGI_gcrc", "PGII_gcrc")
+
+# 纳入分析结局名
+outcome.names <- c("Stomach", "Colorectal", "gcrc", 
+                   "death", "Cancer")
+```
+
+
+#### 创建函数
+
+```{r collapse=TRUE}
+adj_uni_cox <- function(variable, outcome, data){
+  # 构建公式
+  formula <- as.formula(paste0(paste0("Surv(time,", outcome, "==1) ~ ", variable),
+                               "+Age_clas + Sex + Smoking + Drinking + History"))
+  
+  # 拟合Cox模型
+  cox1 <- coxph(formula, data = data)
+  cox2 <- summary(cox1)
+  
+  # 提取所有系数和置信区间
+  results <- data.frame(
+    'Outcome' = outcome,  # 添加结局列
+    'Characteristics' = rownames(cox2$coefficients),
+    'HR' = round(cox2$conf.int[, 1], 2),
+    CI_lower = round(cox2$conf.int[, 3], 2),
+    CI_upper = round(cox2$conf.int[, 4], 2),
+    'P value' = round(cox2$coefficients[, 5], 3)
+  ) %>%
+    mutate('95%CI' = paste(CI_lower, CI_upper, sep = "-")) %>%
+    dplyr::select(-CI_lower, -CI_upper) # 去除 CI_lower 和 CI_upper 列
+
+
+  # 过滤出 variable 变量相关的行 (包含 variable 本身和它的交互项)
+  results <- results %>% filter(grepl(paste0("^", variable, ".*"), Characteristics))
+
+  return(results)
+}
+
+# 创建一个空列表，用于存储所有结果
+all_results <- list()
+```
+
+
+#### 使用嵌套循环遍历所有变量和结局
+
+```{r collapse=TRUE}
+# 循环遍历所有结局
+for (outcome in outcome.names) {
+  # 创建一个空列表，用于存储当前结局的所有变量的结果
+  outcome_results <- list()
+  
+  # 循环遍历所有变量
+  for (variable in variable.names) {
+    # 创建数据子集，避免修改原始数据
+    data_subset <- data1
+    
+    # 检查 outcome 列是否存在 NA 值
+    if (any(is.na(data_subset[[outcome]]))) {
+      # 移除 outcome 列中包含 NA 值的行
+      data_subset <- data_subset[!is.na(data_subset[[outcome]]), ]
+    }
+    
+    # 拟合Cox模型并存储结果
+    result <- adj_uni_cox(variable, outcome, data_subset)
+    outcome_results[[length(outcome_results) + 1]] <- result
+  }
+  
+  # 将当前结局的所有变量的结果合并为一个数据框
+  outcome_result <- ldply(outcome_results, data.frame)
+  
+  # 将当前结局的结果添加到总结果列表中
+  all_results[[length(all_results) + 1]] <- outcome_result
+}
+
+# 将所有结局的结果合并为一个数据框
+adj_final_result <- ldply(all_results, data.frame)
+
+# 打印最终结果
+print(adj_final_result)
+
+
+# 统一 Benjamini-Hochberg 校正
+adj_final_result_adj <- adj_final_result %>% 
+  mutate(BH_adjP = p.adjust(`P.value`, method = "BH"),   # 得到 q-value
+         BH_sig  = BH_adjP < 0.1)                      # TRUE = FDR<0.1
+
+# 按照结局进行分组校正
+adj_final_result_adj_outcome <- adj_final_result %>% 
+  group_by(Outcome) %>% 
+  mutate(q_by_outcome = p.adjust(`P.value`, method = "BH"),
+         BH_sig  = q_by_outcome < 0.1) %>% 
+  ungroup()
+```
+
+
+#### 输出结果
+
+```{r collapse=TRUE, eval=FALSE}
+write.csv(adj_final_result, file = "./output_table/5. gcrc/1. cor/adj5_uni_cox_all.csv")
+# write.csv(adj_final_result_adj, file = "./output_table/5. gcrc/1. cor/adj5_uni_cox_all_adj45.csv")
+write.csv(adj_final_result_adj_outcome, file = "./output_table/5. gcrc/1. cor/adj5_uni_cox_all_adj5.csv")
+```

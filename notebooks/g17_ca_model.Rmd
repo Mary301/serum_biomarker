@@ -1,0 +1,446 @@
+---
+title: "g17_ca_model"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(dplyr) # mutate
+library(tidyr) # %>% 
+library(caret) # createFolds
+library(survival) # coxph
+library(pROC) # roc, auc, ci
+library(binom) # binom.confint
+
+library(ggplot2) # ggplot
+```
+
+
+### **读取数据**
+
+```{r include=FALSE,collapse=TRUE}
+ca_data <- readRDS("./output_data/g17/data_analyze_ca_g17.rds")
+
+data0 <- ca_data # 分析数据data1
+```
+
+#### *查看数据*
+
+```{r collapse=TRUE}
+dput(names(data0))
+# str(data0)
+skimr::skim(data0)
+``` 
+
+
+## **数据预处理**
+
+```{r collapse=TRUE}
+# 胃肠癌数据
+ca_data <- data0 %>%
+  mutate(PGI=log10(PGI),
+         PGII=log10(PGII),
+         PGR=log10(PGR),
+         G17=log10(G17)) %>% 
+  filter(!is.na(incidence))
+
+ca_data$incidence <- as.numeric(as.character(ca_data$incidence))
+```
+
+
+## **G17**
+
+#### *癌模型*
+
+```{r collapse=TRUE}
+max=0  
+num=0 
+set.seed(1)
+folds <- createFolds(y=ca_data$incidence,k=5)
+
+# 使用lapply进行循环计算AUC
+auc_values_g17 <- lapply(1:5, function(i) {
+  test <- ca_data[folds[[i]], ]
+  train <- ca_data[-folds[[i]], ]
+  
+  # 拟合Cox比例风险模型
+  model <- coxph(Surv(time, incidence) ~ G17, data = train, x = TRUE)
+  
+  # 预测线性预测值
+  fold_predict <- predict(model, type = "lp", newdata = test)
+  
+  # 计算AUC值
+  auc(as.numeric(unlist(test[, "incidence"])), fold_predict)
+})
+
+# 找到AUC最大值的索引
+num_g17 <- which.max(auc_values_g17)
+
+# 使用最佳折叠进行最终模型训练和预测
+fold_test_g17 <- ca_data[folds[[num_g17]], ]
+fold_train_g17 <- ca_data[-folds[[num_g17]], ]
+
+# 拟合最终的Cox模型
+final_model_g17 <- coxph(Surv(time, incidence) ~ G17,
+                                 data = fold_train_g17)
+
+# 预测
+fold_predict_g17 <- predict(final_model_g17, 
+                                    type = "lp", 
+                                    newdata = fold_test_g17)
+
+# 生成ROC曲线
+roc_curve_g17 <- roc(as.numeric(fold_test_g17[, "incidence"]), fold_predict_g17)
+
+# 计算并输出95%置信区间
+roc_ci_g17 <- ci(roc_curve_g17)
+auc_value_g17 <- auc(roc_curve_g17)
+
+# 格式化输出
+g17 <- paste0(
+  sprintf("%.3f",auc_value_g17), 
+  " (", 
+  sprintf("%.3f",roc_ci_g17[1]), 
+  "-", 
+  sprintf("%.3f",roc_ci_g17[3]), 
+  ")")
+
+g17
+```
+
+#### 对应Youden指数
+
+```{r collapse=TRUE}
+youden_index_incidence <- roc_curve_g17$thresholds[which.max(roc_curve_g17$sensitivities + roc_curve_g17$specificities -1)]
+
+# 找到对应的敏感性和特异性
+optimal_sensitivity <- roc_curve_g17$sensitivities[which.max(roc_curve_g17$sensitivities + roc_curve_g17$specificities -1)]
+optimal_specificity <- roc_curve_g17$specificities[which.max(roc_curve_g17$sensitivities + roc_curve_g17$specificities -1)]
+
+# 打印结果
+cat("Youden Index:", youden_index_incidence, "\n")
+cat("Optimal Sensitivity:", optimal_sensitivity, "\n")
+cat("Optimal Specificity:", optimal_specificity, "\n")
+```
+
+
+```{r collapse=TRUE}
+max=0  
+num=0 
+set.seed(1)
+folds <- createFolds(y=ca_data$incidence,k=5)
+
+# 使用lapply进行循环计算AUC
+auc_values_comb <- lapply(1:5, function(i) {
+  test <- ca_data[folds[[i]], ]
+  train <- ca_data[-folds[[i]], ]
+  
+  # 拟合Cox比例风险模型
+  model <- coxph(Surv(time, incidence) ~ G17 +
+                   Age_clas + Sex + Smoking + Drinking + History, data = train, x = TRUE)
+  
+  # 预测线性预测值
+  fold_predict <- predict(model, type = "lp", newdata = test)
+  
+  # 计算AUC值
+  auc(as.numeric(unlist(test[, "incidence"])), fold_predict)
+})
+
+# 找到AUC最大值的索引
+num_comb <- which.max(auc_values_comb)
+
+# 使用最佳折叠进行最终模型训练和预测
+fold_test_comb <- ca_data[folds[[num_comb]], ]
+fold_train_comb <- ca_data[-folds[[num_comb]], ]
+
+# 拟合最终的Cox模型
+final_model_comb <- coxph(Surv(time, incidence) ~ G17 +
+                   Age_clas + Sex + Smoking + Drinking + History,
+                                 data = fold_train_comb)
+
+# 预测
+fold_predict_comb <- predict(final_model_comb, 
+                                    type = "lp", 
+                                    newdata = fold_test_comb)
+
+# 生成ROC曲线
+roc_curve_comb <- roc(as.numeric(fold_test_comb[, "incidence"]), fold_predict_comb)
+
+# 计算并输出95%置信区间
+roc_ci_comb <- ci(roc_curve_comb)
+auc_value_comb <- auc(roc_curve_comb)
+
+# 格式化输出
+comb <- paste0(
+  sprintf("%.3f",auc_value_comb), 
+  " (", 
+  sprintf("%.3f",roc_ci_comb[1]), 
+  "-", 
+  sprintf("%.3f",roc_ci_comb[3]), 
+  ")")
+
+comb
+```
+
+#### 对应Youden指数
+
+```{r collapse=TRUE}
+youden_index_incidence <- roc_curve_comb$thresholds[which.max(roc_curve_comb$sensitivities + roc_curve_comb$specificities -1)]
+
+# 找到对应的敏感性和特异性
+optimal_sensitivity <- roc_curve_comb$sensitivities[which.max(roc_curve_comb$sensitivities + roc_curve_comb$specificities -1)]
+optimal_specificity <- roc_curve_comb$specificities[which.max(roc_curve_comb$sensitivities + roc_curve_comb$specificities -1)]
+
+# 打印结果
+cat("Youden Index:", youden_index_incidence, "\n")
+cat("Optimal Sensitivity:", optimal_sensitivity, "\n")
+cat("Optimal Specificity:", optimal_specificity, "\n")
+```
+
+
+```{r collapse=TRUE}
+max=0  
+num=0 
+set.seed(1)
+folds <- createFolds(y=ca_data$incidence,k=5)
+
+# 使用lapply进行循环计算AUC
+auc_values_incidence <- lapply(1:5, function(i) {
+  test <- ca_data[folds[[i]], ]
+  train <- ca_data[-folds[[i]], ]
+  
+  # 拟合Cox比例风险模型
+  model <- coxph(Surv(time, incidence) ~ Age_clas + Sex + Smoking + Drinking + History, data = train, x = TRUE)
+  
+  # 预测线性预测值
+  fold_predict <- predict(model, type = "lp", newdata = test)
+  
+  # 计算AUC值
+  auc(as.numeric(unlist(test[, "incidence"])), fold_predict)
+})
+
+# 找到AUC最大值的索引
+num_incidence <- which.max(auc_values_incidence)
+
+# 使用最佳折叠进行最终模型训练和预测
+fold_test_incidence <- ca_data[folds[[num_incidence]], ]
+fold_train_incidence <- ca_data[-folds[[num_incidence]], ]
+
+# 拟合最终的Cox模型
+final_model_incidence <- coxph(Surv(time, incidence) ~ Age_clas + Sex + Smoking + Drinking + History,
+                                 data = fold_train_incidence)
+
+# 预测
+fold_predict_incidence <- predict(final_model_incidence, 
+                                    type = "lp", 
+                                    newdata = fold_test_incidence)
+
+# 生成ROC曲线
+roc_curve_incidence <- roc(as.numeric(fold_test_incidence[, "incidence"]), fold_predict_incidence)
+
+# 计算并输出95%置信区间
+roc_ci_incidence <- ci(roc_curve_incidence)
+auc_value_incidence <- auc(roc_curve_incidence)
+
+# 格式化输出
+incidence <- paste0(
+  sprintf("%.3f",auc_value_incidence), 
+  " (", 
+  sprintf("%.3f",roc_ci_incidence[1]), 
+  "-", 
+  sprintf("%.3f",roc_ci_incidence[3]), 
+  ")")
+
+incidence
+```
+
+#### 对应Youden指数
+
+```{r collapse=TRUE}
+youden_index_incidence <- roc_curve_incidence$thresholds[which.max(roc_curve_incidence$sensitivities + roc_curve_incidence$specificities -1)]
+
+# 找到对应的敏感性和特异性
+optimal_sensitivity <- roc_curve_incidence$sensitivities[which.max(roc_curve_incidence$sensitivities + roc_curve_incidence$specificities -1)]
+optimal_specificity <- roc_curve_incidence$specificities[which.max(roc_curve_incidence$sensitivities + roc_curve_incidence$specificities -1)]
+
+# 打印结果
+cat("Youden Index:", youden_index_incidence, "\n")
+cat("Optimal Sensitivity:", optimal_sensitivity, "\n")
+cat("Optimal Specificity:", optimal_specificity, "\n")
+```
+
+
+### **模型间auc比较**
+
+```{r collapse=TRUE}
+set.seed(43)
+roc.test(roc_curve_g17,roc_curve_comb,method='bootstrap',boot.n=500) #胃癌 vs 肠癌
+set.seed(43)
+roc.test(roc_curve_crc,roc_curve_ca,method='bootstrap',boot.n=500) #肠癌 vs 胃肠癌
+set.seed(43)
+roc.test(roc_curve_gc,roc_curve_ca,method='bootstrap',boot.n=500) #胃癌 vs 胃肠癌
+```
+
+
+### **绘图**
+
+#### 数据准备
+
+```{r collapse=TRUE}
+# 定义模型及对应变量名
+models <- c("g17", "comb")
+
+# 创建 ROC 数据（specificity 和 sensitivity）
+roc_data <- purrr::map_dfr(models, function(model) {
+  roc_obj <- get(paste0("roc_curve_", model))
+  data.frame(
+    model = model,
+    specificity = roc_obj$specificities,
+    sensitivity = roc_obj$sensitivities
+  )
+})
+
+# 构建 AUC 数据及置信区间
+auc_data <- data.frame(
+  model = models,
+  auc = sapply(models, function(m) get(paste0("auc_value_", m))),
+  ci_lower = sapply(models, function(m) get(paste0("roc_ci_", m))[1]),
+  ci_upper = sapply(models, function(m) get(paste0("roc_ci_", m))[3])
+)
+
+# 合并数据并添加 AUC 标签信息
+roc_auc <- dplyr::left_join(roc_data, auc_data, by = "model") %>%
+  dplyr::mutate(
+    auc_info = sprintf("%s: %.3f (%.3f–%.3f)", model, auc, ci_lower, ci_upper)
+  )
+
+# 定义颜色和标签
+# colors <- c("#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2")
+# colors <- c("#ff7f0e", "#2ca02c", "#d62728") # 只保留三种颜色
+# colors <- c("#0f99b2", "#ffa040", "#ff0000") # 只保留三种颜色
+colors <- c("#0f99b2", "#ffa040") 
+
+roc_auc$auc_info <- factor(roc_auc$auc_info, levels = unique(roc_auc$auc_info))
+
+names(colors) <- levels(roc_auc$auc_info)
+```
+
+
+#### 输出图形
+
+```{r collapse=TRUE}
+pdf(file="./output_plot/model/g17_model/serum_comb.pdf",width=6*1.25,height=6)
+
+ggplot(roc_auc, aes(x = 1 - specificity, y = sensitivity, color = auc_info)) +
+  geom_line(size = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey") +
+  scale_color_manual(values = colors) + # curves colors
+  labs(x = "1 - Specificity", y = "Sensitivity", title = "") +
+  theme_classic() +
+  
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.position = c(0.7, 0.2), # 调整图例位置
+    legend.key.height = unit(0.65, "cm"), # 调整图例键高度调整legend行间距
+
+    # legend.box = "horizontal",
+    # legend.box.background = element_rect(color = "black", linewidth = 0.5), # 设置图例边框颜色
+    # legend.box.margin = margin(5, 5, 5, 5, unit = "pt"), # 图例边框与图例内容的距离
+    
+    axis.text = element_text(size = 12), # 调整坐标轴文字大小
+    axis.title = element_text(size = 14),  # 调整xy轴标题大小
+    axis.line = element_line(linewidth = 0.5),  # 设置坐标轴线宽度
+    
+    plot.margin = unit(rep(10, 4), "pt"),  # 调整图形边距
+    plot.title = element_text(size = 16, hjust = 0.5)  # 居中显示标题，设置字体大小
+  )
+
+dev.off()
+```
+
+
+
+### **输出更多模型信息**
+
+```{r collapse=TRUE}
+models <- c("g17", "comb", "incidence")
+
+results <- lapply(models, function(model) {
+  pred <- get(paste0("fold_predict_", model))
+  test <- get(paste0("fold_test_", model))
+  youden <- get(paste0("youden_index_", model))
+  
+  # 确定结局变量的名称
+  # 根据 model 选择正确的 outcome_var
+  outcome_var <- switch(model,
+    "gc" = "Stomach",
+    "crc" = "Colorectal",
+    "ca" = "ca"
+  )
+
+  # 基于 Youden 指数将预测值转换为二元分类
+  predicted_classes <- ifelse(pred >= youden, 1, 0)
+
+  # 计算混淆矩阵
+  conf_matrix <- confusionMatrix(
+    data = factor(predicted_classes),
+    reference = factor(test[[outcome_var]], levels = c(0, 1)), # 确保 reference levels 正确
+    positive = "1"
+  )
+  
+  sensitivity <- conf_matrix$byClass["Sensitivity"]
+  specificity <- conf_matrix$byClass["Specificity"]
+  accuracy <- conf_matrix$overall["Accuracy"]
+  ppv <- conf_matrix$byClass["Pos Pred Value"]
+  npv <- conf_matrix$byClass["Neg Pred Value"]
+  
+  sens_ci <- binom.confint(conf_matrix$table[2,2], sum(conf_matrix$table[,2]), method = "wilson")
+  spec_ci <- binom.confint(conf_matrix$table[1,1], sum(conf_matrix$table[,1]), method = "wilson")
+  acc_ci  <- binom.confint(sum(diag(conf_matrix$table)), sum(conf_matrix$table), method = "wilson")
+  ppv_ci  <- binom.confint(conf_matrix$table[2,2], sum(conf_matrix$table[2,]), method = "wilson")
+  npv_ci  <- binom.confint(conf_matrix$table[1,1], sum(conf_matrix$table[1,]), method = "wilson")
+  
+  # 格式化输出字符串
+  fmt <- function(est, lower, upper) {
+    paste0(sprintf("%.3f", est), " (", sprintf("%.3f", lower), "–", sprintf("%.3f", upper), ")")
+  }
+  
+  data.frame(
+    model = model,
+    "Sensitivity (95% CI)"  = fmt(sensitivity, sens_ci$lower, sens_ci$upper),
+    "Specificity (95% CI)"  = fmt(specificity, spec_ci$lower, spec_ci$upper),
+    "Accuracy (95% CI)"     = fmt(accuracy, acc_ci$lower, acc_ci$upper),
+    "PPV (95% CI)"          = fmt(ppv, ppv_ci$lower, ppv_ci$upper),
+    "NPV (95% CI)"          = fmt(npv, npv_ci$lower, npv_ci$upper),
+    check.names = FALSE
+  )
+})
+
+# 合并所有更多模型结果
+summary_df <- bind_rows(results)
+
+# 合并所有模型信息
+summary_model <- dplyr::left_join(auc_data, summary_df, by = "model") %>%
+  dplyr::mutate("AUC (95% CI)" = sprintf("%.3f (%.3f–%.3f)",
+                                        auc, ci_lower, ci_upper)) %>%
+  dplyr::select(-auc, -ci_lower, -ci_upper) %>%
+  dplyr::relocate("AUC (95% CI)", .after = model)
+
+print(summary_model)
+```
+
+
+#### 保存结果
+
+```{r included=FALSE, collapse=TRUE, eval=FALSE}
+write.csv(summary_model, 
+          "./output_table/5. ca/4. model/ca_model/serum_all_metrics_summary.csv", 
+          row.names = FALSE)
+```
+
+

@@ -1,0 +1,276 @@
+---
+title: "plot1_fig_cor_all"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### package准备
+
+```{r collapse=TRUE,include=FALSE}
+library(grid)
+library(forestploter)
+```
+
+
+
+#### 加载数据
+
+```{r collapse=TRUE}
+data <- read.csv("./input/forestplot/Fig cor_all.csv", check.names = FALSE)
+```
+
+
+#### 分组变量缩进
+
+```{r collapse=TRUE}
+data1 <-data
+
+data1$Outcome <- ifelse(is.na(data1$inci_dea),
+                                data1$Outcome,
+                                paste0("   ", data1$Outcome))
+```
+
+
+#### 选择需要的列data1
+
+```{r collapse=TRUE}
+# data1$'GC and CRC' <- paste(rep(" ", 20), collapse = " ") ###设置绘制森林图的空列；20为列的宽度
+# data1$'GCC' <- paste(rep(" ", 20), collapse = " ")
+# data1$'CRCC' <- paste(rep(" ", 20), collapse = " ")
+
+data1$'PG' <- paste(rep(" ", 10), collapse = " ")
+data1$' ' <- paste(rep(" ", 1), collapse = " ")
+
+
+# data1[is.na(data1)] <- " "###将数据中的缺失值（NA）替换为空格
+
+# data1[,c(4:6,9:11,14:16)] <- sapply(data1[,c(4:6,9:11,14:16)],as.numeric)###将数据中的字符型转换为数值型
+# data1[,c(4:7,10:13,16:19)] <- sapply(data1[,c(4:7,10:13,16:19)],as.numeric)###将数据中的字符型转换为数值型
+# data1[,c(5:8,11:14,17:20)] <- sapply(data1[,c(5:8,11:14,17:20)],as.numeric)###将数据中的字符型转换为数值型
+
+head(data1)
+```
+
+
+#### 选择绘制森林图的数据所在列
+
+```{r collapse=TRUE}
+# data1_fig <- data1[,c(1:2,25,3,4,22,25,9,10,23,25,15,16,24,25)]
+
+# data1_fig <- data1[,c(1,3,30,
+#                       29,7,8, # PGI
+#                       30,
+#                       29,12,13, # PGII
+#                       30,
+#                       29,17,18, # PGR
+#                       30,
+#                       29,22,23, # G-17
+#                       30,
+#                       29,27,28, # Hp
+#                       30)]
+# 
+# #重命名列名, LETTERS[1:7]
+# colnames(data1_fig) <- c("Outcome", "No. of cases", "", 
+#                          "","HR (95%CI)","FDR",
+#                          "", 
+#                          "","HR (95%CI)","FDR",
+#                          "",
+#                          "","HR (95%CI)","FDR",
+#                          "",
+#                          "","HR (95%CI)","FDR",
+#                          "",
+#                          "","HR (95%CI)","FDR",
+#                          "")
+```
+
+```{r collapse=TRUE}
+# data1_fig <- data1[,c(1:2,25,3,4,22,25,9,10,23,25,15,16,24,25)]
+
+data1_fig <- data1[,c(1,3,30,
+                      29,8, # PGI
+                      30,
+                      29,13, # PGII
+                      30,
+                      29,18, # PGR
+                      30,
+                      29,23, # G-17
+                      30,
+                      29,28, # Hp
+                      30)]
+
+#重命名列名, LETTERS[1:7]
+colnames(data1_fig) <- c("Outcome", "No. of cases", "", 
+                         "HR (95%CI)","FDR",
+                         "", 
+                         "HR (95%CI)","FDR",
+                         "",
+                         "HR (95%CI)","FDR",
+                         "",
+                         "HR (95%CI)","FDR",
+                         "",
+                         "HR (95%CI)","FDR",
+                         "")
+```
+
+#### 设置背景颜色
+
+```{r collapse=TRUE}
+title_color <- rgb(78, 144, 36, alpha = 150, maxColorValue = 255)  # 标题行颜色
+color1 <- rgb(191, 37, 125, alpha = 10, maxColorValue = 255)       # 第一种交替颜色，带透明度
+color2 <- rgb(78, 144, 36, alpha = 50, maxColorValue = 255)       # 第二种交替颜色，带透明度
+```
+
+
+- 设置主题
+
+```{r collapse=TRUE}
+tm <- forest_theme(
+  # core = list(
+  #   bg_params = list(fill = color1)  # 使用定义的背景颜色
+  #   ),
+  colhead=list(
+    # bg_params = list(fill = title_color),  # 使用定义的标题行颜色
+    fg_params=list(hjust=0.5, x=0.5),  # 标题行居中
+    gp = gpar(fontface = "bold", fontsize = 14, lineheight=4)  # 标题行字体
+    ),
+  base_size = 10, # 基础大小
+  # base_family = "Arial",#字体类型
+  ### 箭头设置
+  arrow_type = "closed", # 箭头类型
+  arrow_fill ="black",#箭头填充颜色
+  arrow_label_just = "end",
+  ### 置信区间点的形状，线型、颜色、宽度
+  ci_pch = 20, ###森林图可信区间展示形状
+  # ci_col = c("#bf257d","#003844","#003844"), ###森林图可信区间展示颜色 762a83"#762a83"
+  # ci_fill = c("#4e9024","#E59500","#E59500"),###点的填充色
+  ci_col = "#bf257d",
+  ci_fill = "#4e9024",
+  ci_lty = 1,###线的形
+  ci_lwd = 1.8,###线的宽度
+  ci_Theight = 0.2, ###置信区间两端加短竖线
+  ### 参考线宽度、形状、颜色
+  vertline_lwd = 1.5,###参考线的宽度
+  vertline_lty = "dashed",###参考线形状（实线/虚线）
+  vertline_col = "grey20",###参考线颜色
+  )
+```
+
+
+
+#### 绘制森林图
+
+```{r collapse=TRUE}
+# p <- forest(
+#   data1_fig, ###森林图数据
+#   est = list(data1$I_HR,data1$II_HR,data1$R_HR,data1$G_HR,data1$HP_HR), ###点估计所在列
+#   lower = list(data1$I_LCI,data1$II_LCI,data1$R_LCI,data1$G_LCI,data1$HP_LCI), ###置信区间下限
+#   upper = list(data1$I_HCI,data1$II_HCI,data1$R_HCI,data1$G_HCI,data1$HP_HCI), ###置信区间上限
+#   # sizes = list(data1$V1_se,data1$V2_se,data1$V3_se), ###点估计框的大小，用标准误映
+#   sizes = 0.3,
+#   ci_column = c(4,8,12,16,20), ###置信区间在第几列展示
+#   ref_line=1, ###参考线位于X轴哪里
+#   xlim = list(c(0,5),c(0,5),c(0,5),c(0,5),c(0,5)), ###森林图X轴的范围
+#   ticks_at = c(0,1,2.5,5), ###森林图X轴上标识哪些数字
+#   arrow_lab = c('protect','risk'), ###X轴左右的文字
+#   theme = tm
+#   )###森林图主题
+
+p <- forest(
+  data1_fig, ###森林图数据
+  est = list(data1$I_HR,data1$II_HR,data1$R_HR,data1$G_HR,data1$HP_HR), ###点估计所在列
+  lower = list(data1$I_LCI,data1$II_LCI,data1$R_LCI,data1$G_LCI,data1$HP_LCI), ###置信区间下限
+  upper = list(data1$I_HCI,data1$II_HCI,data1$R_HCI,data1$G_HCI,data1$HP_HCI), ###置信区间上限
+  # sizes = list(data1$V1_se,data1$V2_se,data1$V3_se), ###点估计框的大小，用标准误映
+  sizes = 0.3,
+  ci_column = c(4,7,10,13,16), ###置信区间在第几列展示
+  ref_line=1, ###参考线位于X轴哪里
+  xlim = list(c(0,5),c(0,5),c(0,3),c(0,3),c(0,2)), ###森林图X轴的范围
+  ticks_at = c(0,1,2,3,4,5), ###森林图X轴上标识哪些数字
+  arrow_lab = c('protect','risk'), ###X轴左右的文字
+  theme = tm
+  )###森林图主题
+
+# 设置对齐
+pp <- edit_plot(p, col = 2:17, 
+                which = "text", 
+                hjust = unit(0.5, "npc"),
+                x = unit(0.5, "npc"))
+
+# 图上方添加分组信息
+pp <- insert_text(pp, text = " ",
+                  part = "header",
+                  row = 1,
+                  col = 2,
+                  gp = gpar(fontface = "bold"))
+
+pp <- add_text(pp, text = "PGI", 
+                  part = "header",
+                  row = 1,
+                  col = 4:5,
+                  gp = gpar(fontface = "bold"))
+
+pp <- add_text(pp, text = "PGII",
+               part = "header",
+               row = 1,
+               col = 7:8, 
+               gp = gpar(fontface = "bold"))
+
+pp <- add_text(pp, text = "PGI/II ratio",
+               part = "header",
+               row = 1,
+               col = 10:11, 
+               gp = gpar(fontface = "bold"))
+
+pp <- add_text(pp, text = "G-17",
+               part = "header",
+               row = 1,
+               col = 13:14, 
+               gp = gpar(fontface = "bold"))
+
+pp <- add_text(pp, text = "H.pylori",
+               part = "header",
+               row = 1,
+               col = 16:17, 
+               gp = gpar(fontface = "bold"))
+
+pp <- edit_plot(pp, part = "header", row = 1, which = "background", gp = gpar(fill = title_color))
+
+# 设置标题行
+# rows <- which(data1$row!=" ") # 定位标题行
+# pp <- edit_plot(pp, row = rows, gp = gpar(fontface = "bold")) # 标题行加粗
+# pp <- edit_plot(pp, row = rows, which = "background", gp = gpar(fill = color2))
+
+# # 设置Hp斜体
+# pp <- edit_plot(pp, row = 31, gp = gpar(fontface = "bold.italic")) # HP斜体
+# pp <- add_border(pp, row = 37, where = "bottom", gp = gpar(lwd = 2)) # 最后一行加粗
+
+# 设置列边框
+pp <- add_border(pp,
+                 part = "header", 
+                 row = 1, 
+                 col = c(4:5,7:8,10:11,13:14,16:17), 
+                 gp = gpar(lwd = 1))
+
+pp <- add_border(pp, part = "header", row = 2, where = "bottom", gp = gpar(lwd = 2))
+pp <- add_border(pp, part = "header", row = 1, where = "top", gp = gpar(lwd = 2))
+pp <- add_border(pp, row = 20, where = "bottom", gp = gpar(lwd = 2)) # 最后一行加粗
+
+print(pp)
+```
+
+
+
+#### 保存森林图
+
+```{r eval=FALSE}
+p_wh <- get_wh(plot = pp, unit = "in")
+pdf(file = './output_plot/cor/cor_forest_plot_all.pdf',width = p_wh[1],height = p_wh[2])  #长、宽
+print(pp)
+dev.off()
+```
+
+
+
+

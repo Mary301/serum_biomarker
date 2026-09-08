@@ -1,0 +1,78 @@
+---
+title: "g17_ca_data_preparation"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(skimr) # 数据摘要
+library(dplyr) # mutate
+library(tidyr) # %>% 
+library(plyr) # revalue
+```
+
+
+#### **读取数据**
+
+- 合并所有癌数据
+
+```{r include=FALSE, collapse=TRUE}
+data0 <- readRDS("./output_data/data_analyze_ca.rds")
+
+ca_data0 <- data0 %>%
+  select(recode, incidence, death, time, Age, Sex, PGI, PGII, PGR, HP, G17, Smoking, Drinking, History, Cancer) %>%
+  filter(!is.na(incidence)) %>% 
+  mutate(ca = as.factor(incidence)) # 将 ca 转换为因子型
+```
+
+
+#### **数据预处理** 
+
+- ==G17_ca== 2.8;
+
+- ==分类处理== 血清 G17
+
+```{r collapse=TRUE}
+ca_data1 <- ca_data0
+
+ca_data2 <- ca_data1 %>% 
+  mutate(Age_group = ifelse(Age < 55, "<55", "≥55")) %>% 
+  mutate(Age_group = factor(Age_group, levels = c("<55", "≥55"))) %>%  
+  mutate(Age_clas = ifelse(Age < 45, "35-44", 
+                            ifelse(Age >= 45 & Age < 55,"45-54",
+                                   ifelse(Age >= 55 & Age < 65,"55-64","65-70")))) %>% 
+  mutate(Age_clas = factor(Age_clas, levels = c("35-44", "45-54", "55-64", "65-70"))) %>%
+  
+  mutate(Sex = revalue(Sex, c("1" = "Female", "2" = "Male")),
+         Smoking = revalue(Smoking, c("0" = "No", "1" = "Yes")),
+         Drinking = revalue(Drinking, c("0" = "No", "1" = "Yes")),
+         History = revalue(History, c("0" = "No", "1" = "Yes"))) %>% 
+  # # PGI
+  # mutate(PGI_gc = ifelse(PGI >= 65, "≥65", "<65")) %>%
+  # mutate(PGI_gc = factor(PGI_gc, levels = c("<65", "≥65"))) %>%
+  # 
+  # mutate(PGI_crc = ifelse(PGI < 100, "<100", "≥100")) %>%
+  # mutate(PGI_crc = factor(PGI_crc, levels = c("<100", "≥100"))) %>%
+  # 
+  # mutate(PGI_ca = ifelse(PGI >= 65 & PGI < 100, "65-100",
+  #                          ifelse(PGI < 65, "<65", "≥100"))) %>%
+  # mutate(PGI_ca = factor(PGI_ca, levels = c("<65", "65-100", "≥100"))) %>%
+  # 
+  # # PGII
+  # mutate(PGII_ca = ifelse(PGII < 10.5, "<10.5", "≥10.5")) %>%
+  # mutate(PGII_ca = factor(PGII_ca, levels = c("<10.5", "≥10.5"))) 
+  # G17
+  mutate(G17_ca = ifelse(G17 < 2.8, "<2.8", "≥2.8")) %>%
+  mutate(G17_ca = factor(G17_ca, levels = c("<2.8", "≥2.8")))
+ 
+
+table(ca_data2$incidence)
+
+saveRDS(ca_data2, "./output_data/g17/data_analyze_ca_g17.rds")
+```
+
+

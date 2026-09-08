@@ -1,0 +1,98 @@
+---
+title: "gcrc_data_preparation"
+author: "Study authors"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+#### **加载R包**
+
+```{r include=FALSE,collapse=TRUE}
+library(skimr) # 数据摘要
+library(dplyr) # mutate
+library(tidyr) # %>% 
+library(plyr) # revalue
+```
+
+
+#### **读取数据**
+
+- 合并胃肠癌数据
+
+```{r include=FALSE, collapse=TRUE}
+data0 <- readRDS("./output_data/data_analyze_ca.rds")
+
+gcrc_data0 <- data0 %>%
+  select(recode, incidence, death, time, Age, Sex, PGI, PGII, PGR, HP, G17, Smoking, Drinking, History, Stomach, Colorectal, Cancer) %>%
+  mutate(
+    gcrc = case_when(
+      is.na(Stomach) & is.na(Colorectal) ~ NA_real_,
+      Colorectal == 1 | Stomach == 1 ~ 1,
+      Colorectal == 0 & Stomach == 0 ~ 0,
+      TRUE ~ NA_real_  # 处理其他情况，主要是为了避免出现意外的NA
+    )
+  ) %>%
+  filter(!is.na(gcrc)) %>% 
+  mutate(gcrc = as.factor(gcrc)) # 将 gcrc 转换为因子型
+```
+
+
+#### **数据预处理** 
+
+```{r collapse=TRUE}
+gcrc_data1 <- gcrc_data0
+
+gcrc_data2 <- gcrc_data1 %>% 
+  mutate(Age_group = ifelse(Age < 55, "<55", "≥55")) %>% 
+  mutate(Age_group = factor(Age_group, levels = c("<55", "≥55"))) %>%  
+  mutate(Age_clas = ifelse(Age < 45, "35-44", 
+                            ifelse(Age >= 45 & Age < 55,"45-54",
+                                   ifelse(Age >= 55 & Age < 65,"55-64","65-70")))) %>% 
+  mutate(Age_clas = factor(Age_clas, levels = c("35-44", "45-54", "55-64", "65-70"))) %>%
+  
+  mutate(Sex = revalue(Sex, c("1" = "Female", "2" = "Male")),
+         Smoking = revalue(Smoking, c("0" = "No", "1" = "Yes")),
+         Drinking = revalue(Drinking, c("0" = "No", "1" = "Yes")),
+         History = revalue(History, c("0" = "No", "1" = "Yes"))) %>% 
+  # PGI
+  mutate(PGI_gc = ifelse(PGI >= 65, "≥65", "<65")) %>%
+  mutate(PGI_gc = factor(PGI_gc, levels = c("<65", "≥65"))) %>%
+
+  mutate(PGI_crc = ifelse(PGI < 100, "<100", "≥100")) %>%
+  mutate(PGI_crc = factor(PGI_crc, levels = c("<100", "≥100"))) %>%
+
+  mutate(PGI_gcrc = ifelse(PGI >= 65 & PGI < 100, "65-100",
+                           ifelse(PGI < 65, "<65", "≥100"))) %>%
+  mutate(PGI_gcrc = factor(PGI_gcrc, levels = c("<65", "65-100", "≥100"))) %>%
+  
+  # PGII
+  mutate(PGII_gcrc = ifelse(PGII < 10.5, "<10.5", "≥10.5")) %>%
+  mutate(PGII_gcrc = factor(PGII_gcrc, levels = c("<10.5", "≥10.5"))) 
+
+  # %>%
+
+  # mutate(PGII_gcrc = ifelse(PGII < 14.5, "<14.5", "≥14.5")) %>%
+  # mutate(PGII_gcrc = factor(PGII_gcrc, levels = c("<14.5", "≥14.5"))) %>%
+  
+  # mutate(PGII_gcrc = ifelse(PGII < 10.3, "<10.3", "≥10.3")) %>%
+  # mutate(PGII_gcrc = factor(PGII_gcrc, levels = c("<10.3", "≥10.3"))) %>%
+  
+  # PGR
+  # mutate(PGR_gc = ifelse(PGR >= 9.0, "≥9.0", "<9.0")) %>%
+  # mutate(PGR_gc = factor(PGR_gc, levels = c("≥9.0", "<9.0"))) %>%
+  # 
+  # # G17
+  # mutate(G17_gc = ifelse(G17 < 0.2, "<0.2", 
+  #                        ifelse(G17 >= 0.2 & G17 < 6.5, "0.2-6.5", "≥6.5"))) %>% 
+  # mutate(G17_gc = factor(G17_gc, levels = c("0.2-6.5", "<0.2", "≥6.5")))
+ 
+
+table(gcrc_data2$gcrc)
+table(gcrc_data2$Stomach)
+table(gcrc_data2$Colorectal)
+
+saveRDS(gcrc_data2, "./output_data/gcrc/data_analyze_gcrc.rds")
+```
+
+
